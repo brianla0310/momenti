@@ -6,6 +6,9 @@
 // ─────────────────────────────────────────────────────────────
 import { useState, useEffect, useRef } from "react";
 import { BookOpen, Map as MapIcon, Stamp, Plus, X, Camera, MapPin, ChevronLeft } from "lucide-react";
+// Design tokens (future source of truth). App.jsx is still JSX-first and mostly
+// inlines its own values; this wires in only the font stacks, which are identical.
+import { FONTS } from "./design/typography";
 
 /* ---------- theme tokens ---------- */
 const THEMES = {
@@ -131,8 +134,8 @@ const GlobalStyle = ({ t }) => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap');
 
-    .cp-root { font-family: 'Nunito', ui-rounded, -apple-system, sans-serif; }
-    .cp-display { font-family: 'Fredoka', 'Nunito', ui-rounded, sans-serif; }
+    .cp-root { font-family: ${FONTS.body.stack}; }
+    .cp-display { font-family: ${FONTS.display.stack}; }
 
     .cp-sticker {
       display: inline-block; line-height: 1;
