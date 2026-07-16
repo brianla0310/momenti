@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  CAFFÈ PASSPORT · prototipo interattivo (MVP mockup)
+//  MOMENTI · prototipo interattivo (MVP mockup)
 //  4 screens: Diario (sticker calendar) · Log flow (photo→cutout
 //  sticker) · Mappa (ephemeral balloon reviews) · Passaporto
 //  Emoji stand in for real photo-cutout stickers.
@@ -358,7 +358,7 @@ function Mappa({ t, mode, balloons, now }) {
   return (
     <div style={{ padding: "0 16px 110px" }}>
       <div style={{ position: "relative", marginTop: 14, marginBottom: 10 }}>
-        <div className="cp-display" style={{ fontSize: 24, fontWeight: 700, color: t.ink }}>Mappa · Milano</div>
+        <div className="cp-display" style={{ fontSize: 24, fontWeight: 700, color: t.ink }}>Live Map · Milano</div>
         <div style={{ fontSize: 12.5, color: t.sub, fontWeight: 700 }}>
           🎈 1 ora fissa, poi puff · niente cronologia · {balloons.length} attivi
         </div>
@@ -470,18 +470,18 @@ function Passaporto({ t, mode, isPublic, setIsPublic }) {
       {/* cover */}
       <div style={{ marginTop: 18, background: `linear-gradient(150deg, ${t.ink}, #1d110b)`, borderRadius: 22, padding: "22px 20px", color: t.bg, textAlign: "center", boxShadow: "0 6px 18px rgba(51,33,26,.3)", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 10, border: `1.5px solid rgba(248,239,221,.35)`, borderRadius: 16, pointerEvents: "none" }} />
-        <div className="cp-display" style={{ letterSpacing: 3, fontSize: 11, opacity: 0.8, fontWeight: 500 }}>REPUBBLICA DEL {mode === "caffe" ? "CAFFÈ" : "GELATO"}</div>
+        <div className="cp-display" style={{ letterSpacing: 3, fontSize: 11, opacity: 0.8, fontWeight: 500 }}>LA COLLEZIONE {mode === "caffe" ? "CAFFÈ" : "GELATO"}</div>
         <div style={{ fontSize: 44, margin: "8px 0" }} className="cp-sticker">{mode === "caffe" ? "☕" : "🍦"}</div>
-        <div className="cp-display" style={{ fontSize: 21, fontWeight: 700 }}>Passaporto</div>
-        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 700, marginTop: 2 }}>titolare: Seojung · Milano 🇮🇹</div>
+        <div className="cp-display" style={{ fontSize: 21, fontWeight: 700 }}>Stickerbook</div>
+        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 700, marginTop: 2 }}>Seojung · Milano 🇮🇹</div>
       </div>
 
       {/* diario pubblico/privato */}
       <div style={{ marginTop: 12, background: t.paper, borderRadius: 16, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 2px 8px rgba(51,33,26,.08)" }}>
         <span style={{ fontSize: 24 }}>{isPublic ? "🌍" : "🔒"}</span>
         <div style={{ flex: 1 }}>
-          <div className="cp-display" style={{ fontWeight: 600, fontSize: 14, color: t.ink }}>Diario {isPublic ? "pubblico" : "privato"}</div>
-          <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700 }}>{isPublic ? "gli altri possono sfogliare i tuoi sticker" : "solo tu vedi il tuo diario (default)"}</div>
+          <div className="cp-display" style={{ fontWeight: 600, fontSize: 14, color: t.ink }}>{isPublic ? "Share Page" : "Private Page"}</div>
+          <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700 }}>{isPublic ? "others can flip through your stickers" : "only you can see your diary (default)"}</div>
         </div>
         <button onClick={() => setIsPublic(!isPublic)} aria-label="cambia visibilità" style={{ border: "none", cursor: "pointer", width: 46, height: 26, borderRadius: 14, background: isPublic ? t.accent : t.accentSoft, position: "relative", transition: "background .2s" }}>
           <span style={{ position: "absolute", top: 3, left: isPublic ? 23 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left .25s cubic-bezier(.34,1.56,.64,1)", boxShadow: "0 1px 3px rgba(51,33,26,.3)" }} />
@@ -489,7 +489,7 @@ function Passaporto({ t, mode, isPublic, setIsPublic }) {
       </div>
 
       {/* stamps */}
-      <div className="cp-display" style={{ margin: "18px 4px 8px", fontSize: 15, fontWeight: 600, color: t.ink }}>Timbri di quartiere</div>
+      <div className="cp-display" style={{ margin: "18px 4px 8px", fontSize: 15, fontWeight: 600, color: t.ink }}>Sticker collection</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
         {STAMPS.map((s, i) => {
           const col = t[STAMP_COLORS_IDX[s.color]];
@@ -512,7 +512,7 @@ function Passaporto({ t, mode, isPublic, setIsPublic }) {
       </div>
 
       {/* badges */}
-      <div className="cp-display" style={{ margin: "18px 4px 8px", fontSize: 15, fontWeight: 600, color: t.ink }}>Medaglie</div>
+      <div className="cp-display" style={{ margin: "18px 4px 8px", fontSize: 15, fontWeight: 600, color: t.ink }}>Keepsakes</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {BADGES.map((b, i) => (
           <div key={b.name} style={{ background: t.paper, borderRadius: 16, padding: "11px 14px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 2px 8px rgba(51,33,26,.08)", opacity: b.done || (b.prog && b.prog[0] > 0) ? 1 : 0.55 }}>
@@ -839,7 +839,7 @@ export default function Momenti() {
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px 10px", background: t.bg, boxShadow: `0 8px 12px -10px rgba(51,33,26,.15)` }}>
           <div>
             <span className="cp-display" style={{ fontSize: 21, fontWeight: 700, color: t.ink }}>Momenti</span>
-            <span className="cp-display" style={{ fontSize: 10, fontWeight: 600, color: t.sub, marginLeft: 6, letterSpacing: 1 }}>COFFEE PASSPORT</span>
+            <span className="cp-display" style={{ fontSize: 10, fontWeight: 600, color: t.sub, marginLeft: 6, letterSpacing: 1 }}>STICKER DIARY</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={() => setShopOpen(true)} aria-label="bottega sticker" className="cp-display" style={{ border: "none", borderRadius: 999, padding: "6px 11px", cursor: "pointer", background: t.paper, boxShadow: "0 2px 8px rgba(51,33,26,.12)", fontSize: 12.5, fontWeight: 700, color: t.ink }}>
@@ -876,10 +876,10 @@ export default function Momenti() {
         {/* bottom nav + FAB */}
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 30 }}>
           <div style={{ margin: "0 14px 14px", background: t.paper, borderRadius: 22, boxShadow: "0 -2px 20px rgba(51,33,26,.14)", display: "flex", alignItems: "center", position: "relative" }}>
-            <TabBtn id="diario" icon={BookOpen} label="Diario" />
-            <TabBtn id="mappa" icon={MapIcon} label="Mappa" />
+            <TabBtn id="diario" icon={BookOpen} label="Diary" />
+            <TabBtn id="mappa" icon={MapIcon} label="Map" />
             <div style={{ width: 66 }} />
-            <TabBtn id="passaporto" icon={Stamp} label="Passaporto" />
+            <TabBtn id="passaporto" icon={Stamp} label="Stickerbook" />
             <div style={{ flex: 1 }} />
             <button onClick={() => setLogOpen(true)} aria-label="aggiungi sticker" style={{
               position: "absolute", left: "50%", top: -20, transform: "translateX(-50%)",
