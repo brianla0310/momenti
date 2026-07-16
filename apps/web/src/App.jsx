@@ -913,17 +913,36 @@ function StickerbookSheet({ t, page, setPage, onPick, onClose }) {
   );
 }
 
+/* ═══════════════ localStorage persistence ═══════════════ */
+// One versioned JSON blob under a single key. Only durable data is saved
+// (diary entries, placed stickers, owned packs, beans). Ephemeral state —
+// live map balloons, modals/sheets, active tab, toasts — is never persisted.
+const STORAGE_KEY = "momenti.v1";
+
+function loadPersisted() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1) return null;
+    return data;
+  } catch {
+    return null; // missing / corrupt / storage unavailable → seed defaults
+  }
+}
+
 /* ═══════════════ APP SHELL ═══════════════ */
 
 export default function Momenti() {
+  const [saved] = useState(loadPersisted); // parsed once on mount; null if absent/corrupt
   const [mode, setMode] = useState("caffe");
   const [tab, setTab] = useState("diario");
-  const [entries, setEntries] = useState(SEED_ENTRIES);
+  const [entries, setEntries] = useState(saved?.entries ?? SEED_ENTRIES);
   const [logOpen, setLogOpen] = useState(false);
   const [openDay, setOpenDay] = useState(null);
   const [toast, setToast] = useState(null);
-  const [beans, setBeans] = useState(12);
-  const [ownedPacks, setOwnedPacks] = useState([]);
+  const [beans, setBeans] = useState(saved?.beans ?? 12);
+  const [ownedPacks, setOwnedPacks] = useState(saved?.ownedPacks ?? []);
   const [shopOpen, setShopOpen] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
 
@@ -932,8 +951,9 @@ export default function Momenti() {
   const [bookOpen, setBookOpen] = useState(false);
   const [bookPage, setBookPage] = useState(0);
   const [placingSticker, setPlacingSticker] = useState(null); // peeled asset waiting for a tap on the page
-  const [pageStickers, setPageStickers] = useState([]);       // instances stuck on today's diary page
-  const placedIdRef = useRef(1);
+  const [pageStickers, setPageStickers] = useState(saved?.pageStickers ?? []); // instances stuck on today's diary page
+  // resume ids past the highest restored one so new placements never collide
+  const placedIdRef = useRef((saved?.pageStickers?.reduce((m, s) => Math.max(m, s.id), 0) ?? 0) + 1);
 
   const t = THEMES[mode];
 
@@ -961,6 +981,15 @@ export default function Momenti() {
   useEffect(() => {
     setBalloons((bs) => bs.filter((b) => now - b.born < b.life));
   }, [now]);
+
+  /* persist durable state on change (single versioned blob) */
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, entries, beans, ownedPacks, pageStickers }));
+    } catch {
+      // ignore write failures (quota exceeded / private mode)
+    }
+  }, [entries, beans, ownedPacks, pageStickers]);
 
   const decos = [...DECOS, ...ownedPacks.flatMap((id) => PACKS.find((p) => p.id === id).items)];
 
