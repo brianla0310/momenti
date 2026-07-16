@@ -10,6 +10,7 @@ import { BookOpen, Map as MapIcon, Stamp, Plus, X, Camera, MapPin, ChevronLeft }
 // inlines its own values; this wires in the font stacks and sticker rotation range.
 import { FONTS } from "./design/typography";
 import { STICKER } from "./design/tokens";
+import { createStickerInstance, seedStickerAssets } from "./data/stickers";
 
 /* ---------- theme tokens ---------- */
 const THEMES = {
@@ -65,15 +66,20 @@ const DRINKS = {
 
 const DECOS = ["✨", "💛", "🌼", "⭐", "🇮🇹"];
 
-/* mock stickerbook: reusable sticker *assets* built from existing emoji
-   (drinks + decos). No uploads, no backend — prototype only.
-   Placed stickers on the diary page are separate *instances*, so
-   returning/removing an instance never deletes the asset. */
-const STICKER_ASSETS = [
-  ...DRINKS.caffe.map((d, i) => ({ id: `caffe-${i}`, emoji: d.emoji, name: d.name })),
-  ...DRINKS.gelato.map((d, i) => ({ id: `gelato-${i}`, emoji: d.emoji, name: d.name })),
-  ...DECOS.map((e, i) => ({ id: `deco-${i}`, emoji: e, name: ["Sparkle", "Cuore", "Margherita", "Stella", "Italia"][i] })),
-];
+/* Stickerbook assets: reusable StickerAsset designs seeded from the built-in
+   drink + deco emoji (see ./data/stickers). Placed stickers on the diary page
+   are separate StickerInstances that reference an asset by id, so
+   returning/removing an instance never touches the asset. No uploads/backend. */
+const STICKER_ASSETS = seedStickerAssets({
+  caffe: DRINKS.caffe,
+  gelato: DRINKS.gelato,
+  decos: DECOS,
+  decoNames: ["Sparkle", "Cuore", "Margherita", "Stella", "Italia"],
+});
+const ASSET_BY_ID = Object.fromEntries(STICKER_ASSETS.map((a) => [a.id, a]));
+const getAsset = (id) => ASSET_BY_ID[id];
+/* single diary page for now (Luglio 2026); instances are keyed to it */
+const DIARY_PAGE_ID = "2026-07";
 const BOOK_PAGE_SIZE = 8;
 
 const PACKS = [
@@ -283,7 +289,7 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
       {/* placing hint */}
       {placing && (
         <div className="cp-pop" style={{ marginTop: 10, background: t.accentSoft, borderRadius: 14, padding: "9px 12px", display: "flex", alignItems: "center", gap: 9, border: `1.5px dashed ${t.accent}` }}>
-          <span className="cp-sticker-sm cp-bob" style={{ fontSize: 22 }}>{placing.emoji}</span>
+          <span className="cp-sticker-sm cp-bob" style={{ fontSize: 22 }}>{placing.content}</span>
           <span className="cp-display" style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: t.ink }}>tap the calendar page to stick it ✨</span>
           <button onClick={onCancelPlacing} className="cp-display" style={{ border: "none", background: t.paper, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, color: t.sub, cursor: "pointer" }}>cancel</button>
         </div>
@@ -339,25 +345,30 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
         </div>
 
         {/* placed stickers (instances stuck on this page) */}
-        {pageStickers.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setMenuFor(menuFor === s.id ? null : s.id)}
-            aria-label={`placed sticker ${s.name}`}
-            className="cp-sticker cp-pop"
-            style={{
-              position: "absolute", left: `${s.x}%`, top: `${s.y}%`,
-              transform: `translate(-50%,-50%) rotate(${s.rot}deg)`,
-              fontSize: 30, lineHeight: 1, padding: 0, zIndex: 7,
-              border: "none", background: "transparent", cursor: "pointer",
-            }}
-          >{s.emoji}</button>
-        ))}
+        {pageStickers.map((s) => {
+          const asset = getAsset(s.assetId);
+          if (!asset) return null; // unknown/removed asset → skip (stays safe on load)
+          return (
+            <button
+              key={s.id}
+              onClick={() => setMenuFor(menuFor === s.id ? null : s.id)}
+              aria-label={`placed sticker ${asset.name}`}
+              className="cp-sticker cp-pop"
+              style={{
+                position: "absolute", left: `${s.x}%`, top: `${s.y}%`,
+                transform: `translate(-50%,-50%) rotate(${s.rotation}deg) scale(${s.scale})`,
+                fontSize: 30, lineHeight: 1, padding: 0, zIndex: 7,
+                border: "none", background: "transparent", cursor: "pointer",
+              }}
+            >{asset.content}</button>
+          );
+        })}
 
         {/* action menu for a placed sticker */}
         {menuFor != null && (() => {
           const s = pageStickers.find((p) => p.id === menuFor);
           if (!s) return null;
+          const asset = getAsset(s.assetId);
           const below = s.y < 55; // open downward if the sticker sits high on the page
           return (
             <>
@@ -369,7 +380,7 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
                 background: t.paper, borderRadius: 14, padding: 6,
                 border: `1.5px solid ${t.accentSoft}`, boxShadow: "0 6px 18px rgba(51,33,26,.25)",
               }}>
-                <div className="cp-display" style={{ fontSize: 11, fontWeight: 600, color: t.sub, padding: "3px 8px 5px" }}>{s.emoji} {s.name}</div>
+                <div className="cp-display" style={{ fontSize: 11, fontWeight: 600, color: t.sub, padding: "3px 8px 5px" }}>{asset ? `${asset.content} ${asset.name}` : ""}</div>
                 {[
                   ["↩", "Return to Stickerbook", onReturn],
                   ["⧉", "Duplicate", onDuplicate],
@@ -897,7 +908,7 @@ function StickerbookSheet({ t, page, setPage, onPick, onClose }) {
               border: "none", background: t.paper, borderRadius: 16, padding: "12px 4px 9px",
               cursor: "pointer", boxShadow: "0 2px 8px rgba(51,33,26,.08)",
             }}>
-              <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + page * BOOK_PAGE_SIZE)}deg)` }}>{a.emoji}</span>
+              <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + page * BOOK_PAGE_SIZE)}deg)` }}>{a.content}</span>
               <span className="cp-display" style={{ display: "block", fontSize: 10, fontWeight: 600, color: t.ink, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
             </button>
           ))}
@@ -919,13 +930,32 @@ function StickerbookSheet({ t, page, setPage, onPick, onClose }) {
 // live map balloons, modals/sheets, active tab, toasts — is never persisted.
 const STORAGE_KEY = "momenti.v1";
 
+// Migrate a v1 blob (placements as { id, assetId, emoji, name, x, y, rot })
+// to v2 (placements as StickerInstance referencing assets by id).
+function migrateV1toV2(v1) {
+  const pageStickers = Array.isArray(v1.pageStickers)
+    ? v1.pageStickers.map((p) => createStickerInstance({
+        id: p.id,
+        assetId: p.assetId,
+        x: p.x, y: p.y,
+        rotation: p.rot,               // v1 used `rot`
+        scale: 1,
+        placedAt: p.placedAt ?? Date.now(),
+        page: DIARY_PAGE_ID,
+      }))
+    : [];
+  return { version: 2, entries: v1.entries, beans: v1.beans, ownedPacks: v1.ownedPacks, pageStickers };
+}
+
 function loadPersisted() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.version !== 1) return null;
-    return data;
+    if (!data) return null;
+    if (data.version === 2) return data;
+    if (data.version === 1) return migrateV1toV2(data); // upgrade old placements
+    return null;                                         // unknown version → seed defaults
   } catch {
     return null; // missing / corrupt / storage unavailable → seed defaults
   }
@@ -985,7 +1015,7 @@ export default function Momenti() {
   /* persist durable state on change (single versioned blob) */
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, entries, beans, ownedPacks, pageStickers }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, entries, beans, ownedPacks, pageStickers }));
     } catch {
       // ignore write failures (quota exceeded / private mode)
     }
@@ -1018,29 +1048,33 @@ export default function Momenti() {
   const pickFromBook = (asset) => {
     setBookOpen(false);
     setPlacingSticker(asset);
-    showToast(`${asset.emoji} peeled! tap the page to stick it`);
+    showToast(`${asset.content} peeled! tap the page to stick it`);
   };
   const placeSticker = (x, y) => {
     if (!placingSticker) return;
-    setPageStickers((ps) => [...ps, {
+    setPageStickers((ps) => [...ps, createStickerInstance({
       id: placedIdRef.current++, assetId: placingSticker.id,
-      emoji: placingSticker.emoji, name: placingSticker.name,
-      x, y, rot: randomTilt(),
-    }]);
-    showToast(`${placingSticker.emoji} stuck! ✨`);
+      x, y, rotation: randomTilt(), scale: 1, placedAt: Date.now(), page: DIARY_PAGE_ID,
+    })]);
+    showToast(`${placingSticker.content} stuck! ✨`);
     setPlacingSticker(null);
   };
   /* removes only the placed instance — the asset stays in the Stickerbook */
   const returnPlaced = (id) => {
     const s = pageStickers.find((p) => p.id === id);
+    const asset = s && getAsset(s.assetId);
     setPageStickers((ps) => ps.filter((p) => p.id !== id));
-    showToast(`${s ? s.emoji + " " : ""}back in the Stickerbook ↩`);
+    showToast(`${asset ? asset.content + " " : ""}back in the Stickerbook ↩`);
   };
   const duplicatePlaced = (id) => {
     setPageStickers((ps) => {
       const s = ps.find((p) => p.id === id);
       if (!s) return ps;
-      return [...ps, { ...s, id: placedIdRef.current++, x: Math.min(93, s.x + 7), y: Math.min(91, s.y + 7), rot: randomTilt() }];
+      return [...ps, createStickerInstance({
+        ...s, id: placedIdRef.current++,
+        x: Math.min(93, s.x + 7), y: Math.min(91, s.y + 7),
+        rotation: randomTilt(), placedAt: Date.now(),
+      })];
     });
     showToast("⧉ stuck a copy!");
   };
