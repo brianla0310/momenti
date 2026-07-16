@@ -7,8 +7,9 @@
 import { useState, useEffect, useRef } from "react";
 import { BookOpen, Map as MapIcon, Stamp, Plus, X, Camera, MapPin, ChevronLeft } from "lucide-react";
 // Design tokens (future source of truth). App.jsx is still JSX-first and mostly
-// inlines its own values; this wires in only the font stacks, which are identical.
+// inlines its own values; this wires in the font stacks and sticker rotation range.
 import { FONTS } from "./design/typography";
+import { STICKER } from "./design/tokens";
 
 /* ---------- theme tokens ---------- */
 const THEMES = {
@@ -63,6 +64,17 @@ const DRINKS = {
 };
 
 const DECOS = ["✨", "💛", "🌼", "⭐", "🇮🇹"];
+
+/* mock stickerbook: reusable sticker *assets* built from existing emoji
+   (drinks + decos). No uploads, no backend — prototype only.
+   Placed stickers on the diary page are separate *instances*, so
+   returning/removing an instance never deletes the asset. */
+const STICKER_ASSETS = [
+  ...DRINKS.caffe.map((d, i) => ({ id: `caffe-${i}`, emoji: d.emoji, name: d.name })),
+  ...DRINKS.gelato.map((d, i) => ({ id: `gelato-${i}`, emoji: d.emoji, name: d.name })),
+  ...DECOS.map((e, i) => ({ id: `deco-${i}`, emoji: e, name: ["Sparkle", "Cuore", "Margherita", "Stella", "Italia"][i] })),
+];
+const BOOK_PAGE_SIZE = 8;
 
 const PACKS = [
   { id: "dolce", name: "Dolce vita", items: ["🎀", "💌", "🫶"], price: 10 },
@@ -128,6 +140,11 @@ const BADGES = [
 
 /* random helpers (deterministic-ish tilt per index) */
 const tiltFor = (i) => ((i * 47) % 17) - 8;
+/* free tilt for newly placed stickers, within the token rotation range */
+const randomTilt = () => {
+  const [min, max] = STICKER.rotationRange;
+  return min + Math.random() * (max - min);
+};
 
 /* ---------- global css ---------- */
 const GlobalStyle = ({ t }) => (
@@ -226,7 +243,8 @@ const EntryCard = ({ e, t, i }) => (
 
 /* ═══════════════ 1 · DIARIO ═══════════════ */
 
-function Diario({ t, mode, entries, openDay, setOpenDay }) {
+function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, onCancelPlacing, pageStickers, onPlaceAt, onReturn, onDuplicate, onRemove }) {
+  const [menuFor, setMenuFor] = useState(null); // placed-sticker id with open action menu
   const cells = [];
   for (let i = 0; i < FIRST_WEEKDAY_OFFSET; i++) cells.push(null);
   for (let d = 1; d <= DAYS_IN_MONTH; d++) cells.push(d);
@@ -249,8 +267,30 @@ function Diario({ t, mode, entries, openDay, setOpenDay }) {
         </div>
       </div>
 
+      {/* stickerbook opener */}
+      <button onClick={onOpenBook} style={{ position: "relative", width: "100%", marginTop: 12, background: t.paper, border: "none", borderRadius: 16, padding: "11px 14px", display: "flex", alignItems: "center", gap: 11, boxShadow: "0 2px 8px rgba(51,33,26,.08)", cursor: "pointer", textAlign: "left" }}>
+        <Tape t={t} rot={3} w={56} />
+        <span className="cp-sticker-sm" style={{ fontSize: 24, transform: "rotate(-4deg)" }}>📒</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="cp-display" style={{ display: "block", fontWeight: 600, fontSize: 14, color: t.ink }}>Stickerbook</span>
+          <span style={{ display: "block", fontSize: 11, color: t.sub, fontWeight: 700 }}>
+            {pageStickers.length > 0 ? `${pageStickers.length} stuck on this page · ` : ""}peel a sticker, decorate the page
+          </span>
+        </span>
+        <span className="cp-display" style={{ fontSize: 11.5, fontWeight: 700, color: t.accent, background: t.accentSoft, borderRadius: 999, padding: "5px 11px", flexShrink: 0 }}>Open</span>
+      </button>
+
+      {/* placing hint */}
+      {placing && (
+        <div className="cp-pop" style={{ marginTop: 10, background: t.accentSoft, borderRadius: 14, padding: "9px 12px", display: "flex", alignItems: "center", gap: 9, border: `1.5px dashed ${t.accent}` }}>
+          <span className="cp-sticker-sm cp-bob" style={{ fontSize: 22 }}>{placing.emoji}</span>
+          <span className="cp-display" style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: t.ink }}>tap the calendar page to stick it ✨</span>
+          <button onClick={onCancelPlacing} className="cp-display" style={{ border: "none", background: t.paper, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, color: t.sub, cursor: "pointer" }}>cancel</button>
+        </div>
+      )}
+
       {/* calendar */}
-      <div style={{ marginTop: 14, background: t.paper, borderRadius: 20, padding: "14px 10px 16px", boxShadow: "0 3px 12px rgba(51,33,26,.09)", backgroundImage: `radial-gradient(${t.accentSoft} 1px, transparent 1px)`, backgroundSize: "14px 14px" }}>
+      <div style={{ position: "relative", marginTop: 14, background: t.paper, borderRadius: 20, padding: "14px 10px 16px", boxShadow: "0 3px 12px rgba(51,33,26,.09)", backgroundImage: `radial-gradient(${t.accentSoft} 1px, transparent 1px)`, backgroundSize: "14px 14px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2, marginBottom: 6 }}>
           {["LU", "MA", "ME", "GI", "VE", "SA", "DO"].map((d, i) => (
             <div key={d} className="cp-display" style={{ textAlign: "center", fontSize: 10.5, fontWeight: 600, color: i >= 5 ? t.accent : t.sub }}>{d}</div>
@@ -297,6 +337,76 @@ function Diario({ t, mode, entries, openDay, setOpenDay }) {
             );
           })}
         </div>
+
+        {/* placed stickers (instances stuck on this page) */}
+        {pageStickers.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => setMenuFor(menuFor === s.id ? null : s.id)}
+            aria-label={`placed sticker ${s.name}`}
+            className="cp-sticker cp-pop"
+            style={{
+              position: "absolute", left: `${s.x}%`, top: `${s.y}%`,
+              transform: `translate(-50%,-50%) rotate(${s.rot}deg)`,
+              fontSize: 30, lineHeight: 1, padding: 0, zIndex: 7,
+              border: "none", background: "transparent", cursor: "pointer",
+            }}
+          >{s.emoji}</button>
+        ))}
+
+        {/* action menu for a placed sticker */}
+        {menuFor != null && (() => {
+          const s = pageStickers.find((p) => p.id === menuFor);
+          if (!s) return null;
+          const below = s.y < 55; // open downward if the sticker sits high on the page
+          return (
+            <>
+              <div onClick={() => setMenuFor(null)} style={{ position: "absolute", inset: 0, zIndex: 8 }} />
+              <div className="cp-pop" style={{
+                position: "absolute", zIndex: 10, width: 176,
+                left: `${Math.min(70, Math.max(30, s.x))}%`, top: `${s.y}%`,
+                transform: below ? "translate(-50%, 20px)" : "translate(-50%, calc(-100% - 20px))",
+                background: t.paper, borderRadius: 14, padding: 6,
+                border: `1.5px solid ${t.accentSoft}`, boxShadow: "0 6px 18px rgba(51,33,26,.25)",
+              }}>
+                <div className="cp-display" style={{ fontSize: 11, fontWeight: 600, color: t.sub, padding: "3px 8px 5px" }}>{s.emoji} {s.name}</div>
+                {[
+                  ["↩", "Return to Stickerbook", onReturn],
+                  ["⧉", "Duplicate", onDuplicate],
+                  ["✕", "Remove from page", onRemove],
+                ].map(([icon, label, act]) => (
+                  <button
+                    key={label}
+                    onClick={() => { act(s.id); setMenuFor(null); }}
+                    className="cp-display"
+                    style={{
+                      display: "flex", alignItems: "center", gap: 7, width: "100%",
+                      border: "none", background: "transparent", borderRadius: 10,
+                      padding: "7px 8px", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                      color: label === "Remove from page" ? t.accent : t.ink, textAlign: "left",
+                    }}
+                  >
+                    <span style={{ width: 14, textAlign: "center" }}>{icon}</span> {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          );
+        })()}
+
+        {/* placement capture layer: only while a peeled sticker waits */}
+        {placing && (
+          <div
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              const x = ((e.clientX - r.left) / r.width) * 100;
+              const y = ((e.clientY - r.top) / r.height) * 100;
+              onPlaceAt(Math.min(95, Math.max(5, x)), Math.min(93, Math.max(7, y)));
+            }}
+            aria-label="tap to place sticker"
+            style={{ position: "absolute", inset: 0, zIndex: 12, cursor: "copy", borderRadius: 20, border: `2px dashed ${t.accent}`, background: "rgba(255,255,255,.12)" }}
+          />
+        )}
       </div>
 
       {/* today list */}
@@ -759,6 +869,50 @@ function ShopSheet({ t, beans, owned, onBuy, onClose }) {
   );
 }
 
+/* ═══════════════ STICKERBOOK OVERLAY (mock tray · pages) ═══════════════ */
+
+function StickerbookSheet({ t, page, setPage, onPick, onClose }) {
+  const pages = Math.ceil(STICKER_ASSETS.length / BOOK_PAGE_SIZE);
+  const items = STICKER_ASSETS.slice(page * BOOK_PAGE_SIZE, page * BOOK_PAGE_SIZE + BOOK_PAGE_SIZE);
+  const pageBtn = (disabled) => ({
+    border: "none", borderRadius: 999, width: 34, height: 34, fontSize: 17, fontWeight: 700,
+    cursor: disabled ? "default" : "pointer",
+    background: disabled ? "transparent" : t.paper,
+    color: disabled ? "rgba(0,0,0,.2)" : t.ink,
+    boxShadow: disabled ? "none" : "0 2px 6px rgba(51,33,26,.1)",
+  });
+  return (
+    <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(51,33,26,.35)", zIndex: 45, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={(e) => e.stopPropagation()} className="cp-fadeup" style={{ width: "100%", background: t.bg, borderRadius: "24px 24px 0 0", padding: "10px 18px 22px", maxHeight: "75%", overflowY: "auto", position: "relative" }}>
+        <div style={{ width: 40, height: 5, background: t.accentSoft, borderRadius: 3, margin: "4px auto 12px" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink }}>Stickerbook 📒</div>
+          <button onClick={onClose} aria-label="close stickerbook" style={{ border: "none", background: t.accentSoft, borderRadius: 10, width: 26, height: 26, cursor: "pointer", color: t.ink }}><X size={14} /></button>
+        </div>
+        <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700, marginBottom: 12 }}>tap a sticker to peel it, then stick it on today's page</div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+          {items.map((a, i) => (
+            <button key={a.id} onClick={() => onPick(a)} style={{
+              border: "none", background: t.paper, borderRadius: 16, padding: "12px 4px 9px",
+              cursor: "pointer", boxShadow: "0 2px 8px rgba(51,33,26,.08)",
+            }}>
+              <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + page * BOOK_PAGE_SIZE)}deg)` }}>{a.emoji}</span>
+              <span className="cp-display" style={{ display: "block", fontSize: 10, fontWeight: 600, color: t.ink, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 14 }}>
+          <button onClick={() => setPage(page - 1)} disabled={page === 0} aria-label="previous page" className="cp-display" style={pageBtn(page === 0)}>‹</button>
+          <span className="cp-display" style={{ fontSize: 12.5, fontWeight: 600, color: t.sub }}>Page {page + 1} / {pages}</span>
+          <button onClick={() => setPage(page + 1)} disabled={page >= pages - 1} aria-label="next page" className="cp-display" style={pageBtn(page >= pages - 1)}>›</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════ APP SHELL ═══════════════ */
 
 export default function Momenti() {
@@ -772,6 +926,15 @@ export default function Momenti() {
   const [ownedPacks, setOwnedPacks] = useState([]);
   const [shopOpen, setShopOpen] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
+
+  /* stickerbook overlay — local prototype state only.
+     assets live in STICKER_ASSETS; these are placed *instances*. */
+  const [bookOpen, setBookOpen] = useState(false);
+  const [bookPage, setBookPage] = useState(0);
+  const [placingSticker, setPlacingSticker] = useState(null); // peeled asset waiting for a tap on the page
+  const [pageStickers, setPageStickers] = useState([]);       // instances stuck on today's diary page
+  const placedIdRef = useRef(1);
+
   const t = THEMES[mode];
 
   /* palloncini: stato a livello app così sopravvivono al cambio tab */
@@ -822,6 +985,41 @@ export default function Momenti() {
     showToast(`${p.items[0]} pack "${p.name}" sbloccato!`);
   };
 
+  /* ── stickerbook actions ── */
+  const pickFromBook = (asset) => {
+    setBookOpen(false);
+    setPlacingSticker(asset);
+    showToast(`${asset.emoji} peeled! tap the page to stick it`);
+  };
+  const placeSticker = (x, y) => {
+    if (!placingSticker) return;
+    setPageStickers((ps) => [...ps, {
+      id: placedIdRef.current++, assetId: placingSticker.id,
+      emoji: placingSticker.emoji, name: placingSticker.name,
+      x, y, rot: randomTilt(),
+    }]);
+    showToast(`${placingSticker.emoji} stuck! ✨`);
+    setPlacingSticker(null);
+  };
+  /* removes only the placed instance — the asset stays in the Stickerbook */
+  const returnPlaced = (id) => {
+    const s = pageStickers.find((p) => p.id === id);
+    setPageStickers((ps) => ps.filter((p) => p.id !== id));
+    showToast(`${s ? s.emoji + " " : ""}back in the Stickerbook ↩`);
+  };
+  const duplicatePlaced = (id) => {
+    setPageStickers((ps) => {
+      const s = ps.find((p) => p.id === id);
+      if (!s) return ps;
+      return [...ps, { ...s, id: placedIdRef.current++, x: Math.min(93, s.x + 7), y: Math.min(91, s.y + 7), rot: randomTilt() }];
+    });
+    showToast("⧉ stuck a copy!");
+  };
+  const removePlaced = (id) => {
+    setPageStickers((ps) => ps.filter((p) => p.id !== id));
+    showToast("peeled off the page");
+  };
+
   const TabBtn = ({ id, icon: Icon, label }) => (
     <button onClick={() => setTab(id)} aria-label={label} style={{
       flex: 1, border: "none", background: "transparent", cursor: "pointer",
@@ -864,7 +1062,15 @@ export default function Momenti() {
 
         {/* screens */}
         <div style={{ height: "100vh", overflowY: "auto", paddingTop: 50 }} className="cp-scroll">
-          {tab === "diario" && <Diario t={t} mode={mode} entries={entries} openDay={openDay} setOpenDay={setOpenDay} />}
+          {tab === "diario" && (
+            <Diario
+              t={t} mode={mode} entries={entries} openDay={openDay} setOpenDay={setOpenDay}
+              onOpenBook={() => setBookOpen(true)}
+              placing={placingSticker} onCancelPlacing={() => setPlacingSticker(null)}
+              pageStickers={pageStickers} onPlaceAt={placeSticker}
+              onReturn={returnPlaced} onDuplicate={duplicatePlaced} onRemove={removePlaced}
+            />
+          )}
           {tab === "mappa" && <Mappa t={t} mode={mode} balloons={balloons} now={now} />}
           {tab === "passaporto" && <Passaporto t={t} mode={mode} isPublic={isPublic} setIsPublic={setIsPublic} />}
         </div>
@@ -897,6 +1103,7 @@ export default function Momenti() {
 
         {/* overlays */}
         <DaySheet day={openDay} entries={entries} t={t} onClose={() => setOpenDay(null)} />
+        {bookOpen && <StickerbookSheet t={t} page={bookPage} setPage={setBookPage} onPick={pickFromBook} onClose={() => setBookOpen(false)} />}
         {shopOpen && <ShopSheet t={t} beans={beans} owned={ownedPacks} onBuy={buyPack} onClose={() => setShopOpen(false)} />}
         {logOpen && <LogModal t={t} mode={mode} decos={decos} onClose={() => setLogOpen(false)} onSave={saveEntry} />}
       </div>
