@@ -1875,9 +1875,19 @@ Completed:
 
 Notes:
 
-- TypeScript migration is intentionally deferred.
-- Current prototype remains JSX-first.
-- No Google Maps, Supabase, IAP, AR, real image upload, or data model refactor has been added yet.
+- TypeScript migration is intentionally deferred; the current prototype remains JSX-first.
+- Only visible UI copy plus file renames and build config changed — no components, features, data models, or product strategy were touched.
+
+Not yet implemented (intentionally out of scope so far):
+
+- Google Maps / real place data
+- Supabase / any backend
+- IAP (in-app purchases)
+- AR map
+- Real image upload (photo → cutout sticker; emoji still stand in)
+- `StickerAsset` / `StickerInstance` data models
+- Free 100 sticker asset limit
+- Return to Stickerbook (peel-back) behavior
 
 Next recommended development step:
 
