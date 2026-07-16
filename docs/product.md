@@ -1889,12 +1889,54 @@ Not yet implemented (intentionally out of scope so far):
 - Free 100 sticker asset limit
 - Return to Stickerbook (peel-back) behavior
 
+### 2026-07-16 — Design Token Foundation PR
+
+Completed:
+
+- Created feature branch `feature/design-tokens-foundation`.
+- Added `apps/web/src/design/` with four token files:
+  - `tokens.js` — colors (paper, cream, espresso, bialettiRed, pistacchio, azzurro, amarena, fragolaMilk), radii (card / sticker / pill), sticker styling (white die-cut border, warm shadow, rotation range).
+  - `typography.js` — display font Fredoka, body font Nunito, exact font stacks, Google Fonts import URL.
+  - `shadows.js` — warm espresso-tinted card shadows plus the die-cut sticker drop-shadow filters.
+  - `motion.js` — named motion vocabulary (peel, stick, puff, bob, stamp, pageFlip, tear) with durations, easings, and per-name implementation status.
+- All values copied 1:1 from `App.jsx`; files are commented as the future source of truth while `App.jsx` stays not fully refactored.
+- Minimal safe wiring into `App.jsx`: the two font stacks now come from the `FONTS` token (byte-identical values, verified no visual change).
+- Confirmed `npm run build` succeeds.
+- Created and merged PR #2: `Add design token foundation`.
+
+Notes:
+
+- No behavior change; `App.jsx` still inlines most style values.
+- The large style refactor is intentionally deferred.
+
+### 2026-07-16 — Stickerbook Overlay (first minimal version)
+
+Branch: `feature/stickerbook-overlay`
+
+Completed:
+
+- Added mock sticker assets (`STICKER_ASSETS`, 17 items built from existing drink + deco emoji — no uploads, no backend).
+- Asset / instance separation: placed stickers are instances, so removing one from the page never deletes the asset.
+- Diary screen: `Stickerbook` opener card with a live "N stuck on this page" count.
+- Stickerbook overlay bottom sheet: 4-column sticker tray with `‹ Page 1 / 3 ›` pagination.
+- Placement flow: pick a sticker → hint bar ("tap the calendar page to stick it") → dashed capture layer over the calendar → tap sticks it at that exact spot.
+- Placed stickers use the Momenti sticker look: white die-cut edge, warm shadow, random rotation from the `STICKER.rotationRange` token.
+- Action menu on placed stickers:
+  - `Return to Stickerbook` — removes only the instance, asset stays in the book.
+  - `Duplicate`
+  - `Remove from page`
+- Sticker state lives in the app shell (local React state), so placements survive tab switches.
+- Verified in the running app: pagination, placement accuracy, duplicate / return / remove, day sheet, Map and Stickerbook tabs, zero console errors.
+- Confirmed `npm run build` succeeds.
+
+Notes:
+
+- Local state only — placements are not persisted yet (no localStorage).
+- Still not implemented: Google Maps, Supabase, IAP, AR, real image upload, formal `StickerAsset` / `StickerInstance` data models, free 100 sticker asset limit.
+
 Next recommended development step:
 
-1. Add design tokens and reusable UI components.
-2. Keep current visual style but begin replacing ad hoc inline styles gradually.
-3. Add Stickerbook data model:
-   - `StickerAsset`
-   - `StickerInstance`
-4. Add free 100 sticker asset limit.
-5. Add Return to Stickerbook behavior.
+1. Add localStorage persistence for placed stickers and diary entries.
+2. Formalize `StickerAsset` / `StickerInstance` into real data models.
+3. Add the free 100 sticker asset limit.
+4. Continue replacing ad hoc inline styles with design tokens.

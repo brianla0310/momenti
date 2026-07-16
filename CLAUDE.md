@@ -26,16 +26,22 @@ Avoid:
 
 ## Current implementation priorities
 
-1. Convert the existing prototype to Vite + React + TypeScript.
-2. Remove old Coffee Passport / Passaporto language.
-3. Create reusable design tokens.
-4. Add Stickerbook as the replacement for Passport.
-5. Add StickerAsset and StickerInstance data models.
-6. Add free 100 sticker asset limit.
-7. Add Return to Stickerbook behavior.
-8. Add localStorage persistence.
-9. Improve mock Live Bubble Map.
-10. Add Moka Trails.
+Done:
+
+1. Converted the prototype to a Vite + React web app (JSX-first; TypeScript migration intentionally deferred).
+2. Removed old Coffee Passport / Passaporto language from visible UI.
+3. Created the design token foundation in `apps/web/src/design/` (tokens, typography, shadows, motion).
+4. First minimal Stickerbook overlay: tray + pagination, tap-to-place stickers on the Diary page.
+5. First Return to Stickerbook behavior (removes the placed instance, keeps the asset), plus Duplicate and Remove from page.
+
+Next:
+
+1. Add localStorage persistence.
+2. Formalize StickerAsset and StickerInstance data models.
+3. Add free 100 sticker asset limit.
+4. Continue replacing inline styles with design tokens.
+5. Improve mock Live Bubble Map.
+6. Add Moka Trails.
 
 ## Engineering rules
 
