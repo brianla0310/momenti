@@ -1833,3 +1833,58 @@ Requirements:
 - **v0.8 (07-15)**: 아이디어 디벨롭 반영. Aha Moment/첫 90초 경험, North Star Metric, 런칭 웨지, Moka Trails/Sticker Walks, Mood Weather, Peel Recording, Link-based Social Diary, Artist Drops 중심 로드맵, Creator Pack 라이선스 3단계, Beans 표현 가드레일, Moka 제품 역할 확장, 웹 획득 루프, 실험 계획, 위험한 방향/금지 목록, 네이밍 리스크 섹션 추가. 전면 public account, 카메라 AR 조기 도입, 크리에이터 마켓 즉시 오픈, WhatsApp import, 패스포트 중심 언어를 제거/후순위화.
 - **v0.7 (07-15)**: 스티커 다이어리 + 라이브 맵으로 리포지셔닝. Studio 독립 탭, private/public/market 콘텐츠 레이어, Map AR/Live Bubble Map, WhatsApp export 원칙, Beans paid/bonus 내부 원장, Creator Sticker Market 심사제/라이선스/정산 구조, 웹사이트 획득 전략 추가.
 - **v0.6 이전**: 초기 커피/젤라또 기록, 도장, 휘발성 맵, Moka, Beans, 크리에이터 판매 아이디어 형성. 세부 내용은 현재 버전 기준으로 재정리되었으며, 낡은 포지셔닝은 폐기.
+
+## 24. Development Progress
+
+### 2026-07-16 — Repository and Web Prototype Setup
+
+Completed:
+
+- Created local GitHub repository for Momenti.
+- Added product documentation to `docs/product.md`.
+- Added original JSX prototype to `prototypes/momenti-v0.jsx`.
+- Added `CLAUDE.md` with product and engineering rules.
+- Created Vite React web app under `apps/web`.
+- Loaded the original Momenti prototype into the Vite app.
+- Installed `lucide-react`.
+- Confirmed the prototype runs locally with `npm run dev`.
+
+### 2026-07-16 — UI Repositioning PR
+
+Completed:
+
+- Created feature branch `feature/reposition-ui`.
+- Used Claude Code to update visible UI copy from the old Coffee Passport direction to the new Momenti direction.
+- Replaced visible product language:
+  - `COFFEE PASSPORT` → `STICKER DIARY`
+  - `Passaporto` → `Stickerbook`
+  - `Diario` → `Diary`
+  - `Mappa` → `Map` / `Live Map`
+  - `Timbri di quartiere` → `Sticker collection`
+  - `Medaglie` → `Keepsakes`
+  - `Diario pubblico/privato` → `Share Page` / `Private Page`
+- Renamed app entry files:
+  - `App.tsx` → `App.jsx`
+  - `main.tsx` → `main.jsx`
+- Updated `index.html` to load `/src/main.jsx`.
+- Added `allowJs: true` to `tsconfig.app.json` so the raw JSX prototype can build without TypeScript cleanup.
+- Confirmed:
+  - `npm run build` succeeds.
+  - `npm run dev` serves the app locally.
+- Created and merged PR: `Reposition UI around sticker diary`.
+
+Notes:
+
+- TypeScript migration is intentionally deferred.
+- Current prototype remains JSX-first.
+- No Google Maps, Supabase, IAP, AR, real image upload, or data model refactor has been added yet.
+
+Next recommended development step:
+
+1. Add design tokens and reusable UI components.
+2. Keep current visual style but begin replacing ad hoc inline styles gradually.
+3. Add Stickerbook data model:
+   - `StickerAsset`
+   - `StickerInstance`
+4. Add free 100 sticker asset limit.
+5. Add Return to Stickerbook behavior.
