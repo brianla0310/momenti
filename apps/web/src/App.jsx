@@ -11,6 +11,7 @@ import { BookOpen, Map as MapIcon, Stamp, Plus, X, Camera, MapPin, ChevronLeft }
 import { FONTS } from "./design/typography";
 import { STICKER } from "./design/tokens";
 import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSET_LIMIT } from "./data/stickers";
+import StickerVisual from "./components/StickerVisual";
 
 /* ---------- theme tokens ---------- */
 const THEMES = {
@@ -70,12 +71,15 @@ const DECOS = ["✨", "💛", "🌼", "⭐", "🇮🇹"];
    drink + deco emoji (see ./data/stickers). Placed stickers on the diary page
    are separate StickerInstances that reference an asset by id, so
    returning/removing an instance never touches the asset. No uploads/backend. */
+/* a tasteful few base decos ship as glitter so the effect shows without
+   making a user sticker: ✨ Sparkle (deco-0) and ⭐ Stella (deco-3). */
+const GLITTER_BASE_IDS = new Set(["deco-0", "deco-3"]);
 const STICKER_ASSETS = seedStickerAssets({
   caffe: DRINKS.caffe,
   gelato: DRINKS.gelato,
   decos: DECOS,
   decoNames: ["Sparkle", "Cuore", "Margherita", "Stella", "Italia"],
-});
+}).map((a) => (GLITTER_BASE_IDS.has(a.id) ? { ...a, texture: "glitter" } : a));
 const ASSET_BY_ID = Object.fromEntries(STICKER_ASSETS.map((a) => [a.id, a]));
 /* single diary page for now (Luglio 2026); instances are keyed to it */
 const DIARY_PAGE_ID = "2026-07";
@@ -178,6 +182,14 @@ const GlobalStyle = ({ t }) => (
         drop-shadow(0 1.2px 0 #fff) drop-shadow(0 -1.2px 0 #fff)
         drop-shadow(0 2px 3px rgba(51,33,26,.20));
     }
+    /* glitter: slightly thicker white die-cut edge than paper */
+    .cp-sticker-glit {
+      display: inline-block; line-height: 1;
+      filter:
+        drop-shadow(3px 0 0 #fff) drop-shadow(-3px 0 0 #fff)
+        drop-shadow(0 3px 0 #fff) drop-shadow(0 -3px 0 #fff)
+        drop-shadow(0 4px 7px rgba(51,33,26,.24));
+    }
 
     @keyframes cp-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
     @keyframes cp-pop { 0% { transform: scale(.3) rotate(-12deg); opacity: 0; } 70% { transform: scale(1.12) rotate(3deg); } 100% { transform: scale(1) rotate(0); opacity: 1; } }
@@ -190,6 +202,16 @@ const GlobalStyle = ({ t }) => (
     .cp-fadeup { animation: cp-fadeup .35s ease both; }
     .cp-bob { animation: cp-bob 3.2s ease-in-out infinite; }
 
+    /* holographic sheen sweeping across a glitter sticker */
+    @keyframes cp-glit { from { background-position: -120% 0; } to { background-position: 220% 0; } }
+    .cp-glitter-sheen {
+      position: absolute; inset: 0; border-radius: 22%; pointer-events: none;
+      background: linear-gradient(115deg, transparent 32%, rgba(255,90,200,.55) 44%, rgba(120,200,255,.6) 50%, rgba(190,255,140,.55) 56%, transparent 68%);
+      background-size: 220% 100%;
+      mix-blend-mode: screen;
+      animation: cp-glit 2.6s linear infinite;
+    }
+
     .cp-balloon-fading { opacity: .35; transform: scale(.85); transition: all 1.2s ease; }
 
     .cp-scroll { scrollbar-width: none; }
@@ -201,6 +223,7 @@ const GlobalStyle = ({ t }) => (
 
     @media (prefers-reduced-motion: reduce) {
       .cp-bob, .cp-pop, .cp-fadeup { animation: none !important; }
+      .cp-glitter-sheen { animation: none !important; } /* static sheen */
     }
   `}</style>
 );
@@ -293,7 +316,7 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
       {/* placing hint */}
       {placing && (
         <div className="cp-pop" style={{ marginTop: 10, background: t.accentSoft, borderRadius: 14, padding: "9px 12px", display: "flex", alignItems: "center", gap: 9, border: `1.5px dashed ${t.accent}` }}>
-          <span className="cp-sticker-sm cp-bob" style={{ fontSize: 22 }}>{placing.content}</span>
+          <span className="cp-bob" style={{ display: "inline-block" }}><StickerVisual asset={placing} size={22} /></span>
           <span className="cp-display" style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: t.ink }}>tap the calendar page to stick it ✨</span>
           <button onClick={onCancelPlacing} className="cp-display" style={{ border: "none", background: t.paper, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, color: t.sub, cursor: "pointer" }}>cancel</button>
         </div>
@@ -357,14 +380,14 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
               key={s.id}
               onClick={() => setMenuFor(menuFor === s.id ? null : s.id)}
               aria-label={`placed sticker ${asset.name}`}
-              className="cp-sticker cp-pop"
+              className="cp-pop"
               style={{
                 position: "absolute", left: `${s.x}%`, top: `${s.y}%`,
                 transform: `translate(-50%,-50%) rotate(${s.rotation}deg) scale(${s.scale})`,
-                fontSize: 30, lineHeight: 1, padding: 0, zIndex: 7,
+                lineHeight: 1, padding: 0, zIndex: 7,
                 border: "none", background: "transparent", cursor: "pointer",
               }}
-            >{asset.content}</button>
+            ><StickerVisual asset={asset} size={30} /></button>
           );
         })}
 
@@ -923,7 +946,7 @@ function StickerbookSheet({ t, page, setPage, onPick, onClose, userAssets, onCre
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
             {items.map((a, i) => (
               <button key={a.id} onClick={() => onPick(a)} style={tile(t.paper)}>
-                <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + page * BOOK_PAGE_SIZE)}deg)` }}>{a.content}</span>
+                <span style={{ display: "inline-block", transform: `rotate(${tiltFor(i + page * BOOK_PAGE_SIZE)}deg)` }}><StickerVisual asset={a} size={28} /></span>
                 {label(a)}
               </button>
             ))}
@@ -944,7 +967,7 @@ function StickerbookSheet({ t, page, setPage, onPick, onClose, userAssets, onCre
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 10 }}>
             {userAssets.map((a, i) => (
               <button key={a.id} onClick={() => onPick(a)} style={tile(tileBg(a.texture))}>
-                <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + 2)}deg)` }}>{a.content}</span>
+                <span style={{ display: "inline-block", transform: `rotate(${tiltFor(i + 2)}deg)` }}><StickerVisual asset={a} size={28} /></span>
                 {label(a)}
               </button>
             ))}
@@ -998,7 +1021,9 @@ function StickerCreatorSheet({ t, onClose, onCreate }) {
 
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
           <div style={{ width: 92, height: 92, borderRadius: 20, background: previewBg, boxShadow: "0 2px 10px rgba(51,33,26,.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span className={content ? "cp-sticker" : ""} style={{ fontSize: 50, opacity: content ? 1 : 0.3 }}>{content || "🙂"}</span>
+            {content
+              ? <StickerVisual asset={{ content, texture }} size={50} />
+              : <span style={{ fontSize: 50, opacity: 0.3 }}>🙂</span>}
           </div>
         </div>
 
