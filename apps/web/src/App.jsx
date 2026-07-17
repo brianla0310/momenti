@@ -10,7 +10,7 @@ import { BookOpen, Map as MapIcon, Stamp, Plus, X, Camera, MapPin, ChevronLeft }
 // inlines its own values; this wires in the font stacks and sticker rotation range.
 import { FONTS } from "./design/typography";
 import { STICKER } from "./design/tokens";
-import { createStickerInstance, seedStickerAssets } from "./data/stickers";
+import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSET_LIMIT } from "./data/stickers";
 
 /* ---------- theme tokens ---------- */
 const THEMES = {
@@ -77,10 +77,14 @@ const STICKER_ASSETS = seedStickerAssets({
   decoNames: ["Sparkle", "Cuore", "Margherita", "Stella", "Italia"],
 });
 const ASSET_BY_ID = Object.fromEntries(STICKER_ASSETS.map((a) => [a.id, a]));
-const getAsset = (id) => ASSET_BY_ID[id];
 /* single diary page for now (Luglio 2026); instances are keyed to it */
 const DIARY_PAGE_ID = "2026-07";
 const BOOK_PAGE_SIZE = 8;
+
+/* mock "make a sticker" creator: curated fun emoji + cute default names.
+   No real image upload — emoji content only for now. */
+const CREATOR_EMOJI = ["🌈", "⭐", "💖", "🔥", "🌸", "🍀", "🦋", "🐱", "🌙", "☁️", "🍩", "🧁", "🎀", "👑", "💎", "🍭", "🌵", "🐳", "🍄", "⚡"];
+const CUTE_NAMES = ["Cutie", "Dolce", "Bubbly", "Ciao", "Amore", "Sparkle", "Momento"];
 
 const PACKS = [
   { id: "dolce", name: "Dolce vita", items: ["🎀", "💌", "🫶"], price: 10 },
@@ -249,7 +253,7 @@ const EntryCard = ({ e, t, i }) => (
 
 /* ═══════════════ 1 · DIARIO ═══════════════ */
 
-function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, onCancelPlacing, pageStickers, onPlaceAt, onReturn, onDuplicate, onRemove }) {
+function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, onCancelPlacing, pageStickers, resolveAsset, onPlaceAt, onReturn, onDuplicate, onRemove }) {
   const [menuFor, setMenuFor] = useState(null); // placed-sticker id with open action menu
   const cells = [];
   for (let i = 0; i < FIRST_WEEKDAY_OFFSET; i++) cells.push(null);
@@ -346,7 +350,7 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
 
         {/* placed stickers (instances stuck on this page) */}
         {pageStickers.map((s) => {
-          const asset = getAsset(s.assetId);
+          const asset = resolveAsset(s.assetId);
           if (!asset) return null; // unknown/removed asset → skip (stays safe on load)
           return (
             <button
@@ -368,7 +372,7 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
         {menuFor != null && (() => {
           const s = pageStickers.find((p) => p.id === menuFor);
           if (!s) return null;
-          const asset = getAsset(s.assetId);
+          const asset = resolveAsset(s.assetId);
           const below = s.y < 55; // open downward if the sticker sits high on the page
           return (
             <>
@@ -882,9 +886,12 @@ function ShopSheet({ t, beans, owned, onBuy, onClose }) {
 
 /* ═══════════════ STICKERBOOK OVERLAY (mock tray · pages) ═══════════════ */
 
-function StickerbookSheet({ t, page, setPage, onPick, onClose }) {
+function StickerbookSheet({ t, page, setPage, onPick, onClose, userAssets, onCreate }) {
+  const [creatorOpen, setCreatorOpen] = useState(false);
   const pages = Math.ceil(STICKER_ASSETS.length / BOOK_PAGE_SIZE);
   const items = STICKER_ASSETS.slice(page * BOOK_PAGE_SIZE, page * BOOK_PAGE_SIZE + BOOK_PAGE_SIZE);
+  const used = userAssets.length;
+  const full = used >= FREE_ASSET_LIMIT;
   const pageBtn = (disabled) => ({
     border: "none", borderRadius: 999, width: 34, height: 34, fontSize: 17, fontWeight: 700,
     cursor: disabled ? "default" : "pointer",
@@ -892,33 +899,153 @@ function StickerbookSheet({ t, page, setPage, onPick, onClose }) {
     color: disabled ? "rgba(0,0,0,.2)" : t.ink,
     boxShadow: disabled ? "none" : "0 2px 6px rgba(51,33,26,.1)",
   });
+  const tileBg = (tex) => tex === "glitter"
+    ? "radial-gradient(circle at 30% 22%, #fff 0, rgba(255,255,255,0) 42%), linear-gradient(135deg, #FBE9F0, #E4ECD2)"
+    : t.paper;
+  const tile = (bg) => ({
+    border: "none", background: bg, borderRadius: 16, padding: "12px 4px 9px",
+    cursor: "pointer", boxShadow: "0 2px 8px rgba(51,33,26,.08)",
+  });
+  const label = (a) => (
+    <span className="cp-display" style={{ display: "block", fontSize: 10, fontWeight: 600, color: t.ink, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
+  );
   return (
-    <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(51,33,26,.35)", zIndex: 45, display: "flex", alignItems: "flex-end" }}>
-      <div onClick={(e) => e.stopPropagation()} className="cp-fadeup" style={{ width: "100%", background: t.bg, borderRadius: "24px 24px 0 0", padding: "10px 18px 22px", maxHeight: "75%", overflowY: "auto", position: "relative" }}>
-        <div style={{ width: 40, height: 5, background: t.accentSoft, borderRadius: 3, margin: "4px auto 12px" }} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink }}>Stickerbook 📒</div>
-          <button onClick={onClose} aria-label="close stickerbook" style={{ border: "none", background: t.accentSoft, borderRadius: 10, width: 26, height: 26, cursor: "pointer", color: t.ink }}><X size={14} /></button>
-        </div>
-        <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700, marginBottom: 12 }}>tap a sticker to peel it, then stick it on today's page</div>
+    <>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(51,33,26,.35)", zIndex: 45, display: "flex", alignItems: "flex-end" }}>
+        <div onClick={(e) => e.stopPropagation()} className="cp-fadeup" style={{ width: "100%", background: t.bg, borderRadius: "24px 24px 0 0", padding: "10px 18px 22px", maxHeight: "78%", overflowY: "auto", position: "relative" }}>
+          <div style={{ width: 40, height: 5, background: t.accentSoft, borderRadius: 3, margin: "4px auto 12px" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink }}>Stickerbook 📒</div>
+            <button onClick={onClose} aria-label="close stickerbook" style={{ border: "none", background: t.accentSoft, borderRadius: 10, width: 26, height: 26, cursor: "pointer", color: t.ink }}><X size={14} /></button>
+          </div>
+          <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700, marginBottom: 12 }}>tap a sticker to peel it, then stick it on today's page</div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
-          {items.map((a, i) => (
-            <button key={a.id} onClick={() => onPick(a)} style={{
-              border: "none", background: t.paper, borderRadius: 16, padding: "12px 4px 9px",
-              cursor: "pointer", boxShadow: "0 2px 8px rgba(51,33,26,.08)",
-            }}>
-              <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + page * BOOK_PAGE_SIZE)}deg)` }}>{a.content}</span>
-              <span className="cp-display" style={{ display: "block", fontSize: 10, fontWeight: 600, color: t.ink, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+            {items.map((a, i) => (
+              <button key={a.id} onClick={() => onPick(a)} style={tile(t.paper)}>
+                <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + page * BOOK_PAGE_SIZE)}deg)` }}>{a.content}</span>
+                {label(a)}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 14 }}>
+            <button onClick={() => setPage(page - 1)} disabled={page === 0} aria-label="previous page" className="cp-display" style={pageBtn(page === 0)}>‹</button>
+            <span className="cp-display" style={{ fontSize: 12.5, fontWeight: 600, color: t.sub }}>Page {page + 1} / {pages}</span>
+            <button onClick={() => setPage(page + 1)} disabled={page >= pages - 1} aria-label="next page" className="cp-display" style={pageBtn(page >= pages - 1)}>›</button>
+          </div>
+
+          {/* My stickers — user-created assets + create affordance */}
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: `1.5px dashed ${t.accentSoft}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span className="cp-display" style={{ fontSize: 14, fontWeight: 700, color: t.ink }}>My stickers ✏️</span>
+            <span className="cp-display" style={{ fontSize: 11.5, fontWeight: 700, color: full ? t.accent : t.sub }}>{used}/{FREE_ASSET_LIMIT}</span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginTop: 10 }}>
+            {userAssets.map((a, i) => (
+              <button key={a.id} onClick={() => onPick(a)} style={tile(tileBg(a.texture))}>
+                <span className="cp-sticker-sm" style={{ fontSize: 28, display: "inline-block", transform: `rotate(${tiltFor(i + 2)}deg)` }}>{a.content}</span>
+                {label(a)}
+              </button>
+            ))}
+            <button
+              onClick={() => !full && setCreatorOpen(true)}
+              disabled={full}
+              aria-label="make a sticker"
+              className="cp-display"
+              style={{
+                border: `2px dashed ${full ? "rgba(0,0,0,.18)" : t.accent}`, background: "transparent",
+                borderRadius: 16, padding: "12px 4px 9px", cursor: full ? "default" : "pointer",
+                color: full ? "rgba(0,0,0,.28)" : t.accent,
+              }}
+            >
+              <span style={{ fontSize: 24, display: "block", lineHeight: 1 }}>＋</span>
+              <span style={{ display: "block", fontSize: 10, fontWeight: 700, marginTop: 6 }}>{full ? "Full" : "Make"}</span>
             </button>
+          </div>
+
+          {full && (
+            <div className="cp-display" style={{ marginTop: 10, fontSize: 11.5, fontWeight: 700, color: t.accent, textAlign: "center" }}>
+              Your stickerbook is full — {FREE_ASSET_LIMIT}/{FREE_ASSET_LIMIT}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {creatorOpen && (
+        <StickerCreatorSheet t={t} onClose={() => setCreatorOpen(false)} onCreate={(draft) => { onCreate(draft); setCreatorOpen(false); }} />
+      )}
+    </>
+  );
+}
+
+/* minimal mock sticker creator — emoji content only, no image upload */
+function StickerCreatorSheet({ t, onClose, onCreate }) {
+  const [content, setContent] = useState(null);
+  const [texture, setTexture] = useState("paper");
+  const [name, setName] = useState("");
+  const previewBg = texture === "glitter"
+    ? "radial-gradient(circle at 32% 24%, #fff 0, rgba(255,255,255,0) 46%), linear-gradient(135deg, #FBE9F0, #E4ECD2)"
+    : t.paper;
+  return (
+    <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(51,33,26,.4)", zIndex: 55, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={(e) => e.stopPropagation()} className="cp-fadeup" style={{ width: "100%", background: t.bg, borderRadius: "24px 24px 0 0", padding: "10px 18px 24px", maxHeight: "82%", overflowY: "auto" }}>
+        <div style={{ width: 40, height: 5, background: t.accentSoft, borderRadius: 3, margin: "4px auto 12px" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div className="cp-display" style={{ fontSize: 18, fontWeight: 700, color: t.ink }}>Make a sticker ✨</div>
+          <button onClick={onClose} aria-label="close creator" style={{ border: "none", background: t.accentSoft, borderRadius: 10, width: 26, height: 26, cursor: "pointer", color: t.ink }}><X size={14} /></button>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+          <div style={{ width: 92, height: 92, borderRadius: 20, background: previewBg, boxShadow: "0 2px 10px rgba(51,33,26,.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span className={content ? "cp-sticker" : ""} style={{ fontSize: 50, opacity: content ? 1 : 0.3 }}>{content || "🙂"}</span>
+          </div>
+        </div>
+
+        <div className="cp-display" style={{ fontSize: 12.5, fontWeight: 600, color: t.sub, margin: "2px 2px 6px" }}>Pick an emoji</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 8 }}>
+          {CREATOR_EMOJI.map((e) => (
+            <button key={e} onClick={() => setContent(e)} aria-label={`emoji ${e}`} style={{
+              fontSize: 24, padding: "8px 0", borderRadius: 12, cursor: "pointer",
+              border: content === e ? `2.5px solid ${t.accent}` : "2.5px solid transparent",
+              background: t.paper, boxShadow: "0 2px 6px rgba(51,33,26,.08)",
+            }}>{e}</button>
           ))}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 14 }}>
-          <button onClick={() => setPage(page - 1)} disabled={page === 0} aria-label="previous page" className="cp-display" style={pageBtn(page === 0)}>‹</button>
-          <span className="cp-display" style={{ fontSize: 12.5, fontWeight: 600, color: t.sub }}>Page {page + 1} / {pages}</span>
-          <button onClick={() => setPage(page + 1)} disabled={page >= pages - 1} aria-label="next page" className="cp-display" style={pageBtn(page >= pages - 1)}>›</button>
+        <div className="cp-display" style={{ fontSize: 12.5, fontWeight: 600, color: t.sub, margin: "14px 2px 6px" }}>Texture</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {["paper", "glitter"].map((tex) => (
+            <button key={tex} onClick={() => setTexture(tex)} className="cp-display" style={{
+              flex: 1, padding: "10px 0", borderRadius: 12, cursor: "pointer", fontSize: 13, fontWeight: 700,
+              border: texture === tex ? `2.5px solid ${t.accent}` : "2.5px solid transparent",
+              background: tex === "glitter" ? "linear-gradient(135deg, #FBE9F0, #E4ECD2)" : t.paper,
+              color: t.ink, boxShadow: "0 2px 6px rgba(51,33,26,.08)",
+            }}>{tex === "glitter" ? "✨ glitter" : "📄 paper"}</button>
+          ))}
         </div>
+
+        <div className="cp-display" style={{ fontSize: 12.5, fontWeight: 600, color: t.sub, margin: "14px 2px 6px" }}>Name <span style={{ fontWeight: 500 }}>(optional)</span></div>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={24}
+          placeholder="something cute…"
+          className="cp-display"
+          style={{ width: "100%", boxSizing: "border-box", border: `1.5px solid ${t.accentSoft}`, borderRadius: 12, padding: "10px 12px", fontSize: 13, fontWeight: 600, color: t.ink, background: t.paper }}
+        />
+
+        <button
+          onClick={() => content && onCreate({ content, texture, name })}
+          disabled={!content}
+          className="cp-display"
+          style={{
+            width: "100%", marginTop: 16, padding: "14px 0", borderRadius: 16, border: "none",
+            background: content ? t.accent : t.accentSoft, color: content ? "#fff" : t.sub,
+            fontSize: 15, fontWeight: 700, cursor: content ? "pointer" : "default",
+            boxShadow: content ? "0 5px 14px rgba(200,51,27,.3)" : "none",
+          }}
+        >Add to Stickerbook</button>
       </div>
     </div>
   );
@@ -944,7 +1071,7 @@ function migrateV1toV2(v1) {
         page: DIARY_PAGE_ID,
       }))
     : [];
-  return { version: 2, entries: v1.entries, beans: v1.beans, ownedPacks: v1.ownedPacks, pageStickers };
+  return { version: 2, entries: v1.entries, beans: v1.beans, ownedPacks: v1.ownedPacks, pageStickers, userAssets: [] };
 }
 
 function loadPersisted() {
@@ -984,8 +1111,12 @@ export default function Momenti() {
   const [pageStickers, setPageStickers] = useState(saved?.pageStickers ?? []); // instances stuck on today's diary page
   // resume ids past the highest restored one so new placements never collide
   const placedIdRef = useRef((saved?.pageStickers?.reduce((m, s) => Math.max(m, s.id), 0) ?? 0) + 1);
+  const [userAssets, setUserAssets] = useState(saved?.userAssets ?? []); // user-made StickerAssets (source:"user")
 
   const t = THEMES[mode];
+
+  /* resolve a placed instance's design — base seed assets + user-made ones */
+  const resolveAsset = (id) => ASSET_BY_ID[id] ?? userAssets.find((a) => a.id === id);
 
   /* palloncini: stato a livello app così sopravvivono al cambio tab */
   const [balloons, setBalloons] = useState(() => {
@@ -1015,11 +1146,11 @@ export default function Momenti() {
   /* persist durable state on change (single versioned blob) */
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, entries, beans, ownedPacks, pageStickers }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, entries, beans, ownedPacks, pageStickers, userAssets }));
     } catch {
       // ignore write failures (quota exceeded / private mode)
     }
-  }, [entries, beans, ownedPacks, pageStickers]);
+  }, [entries, beans, ownedPacks, pageStickers, userAssets]);
 
   const decos = [...DECOS, ...ownedPacks.flatMap((id) => PACKS.find((p) => p.id === id).items)];
 
@@ -1062,7 +1193,7 @@ export default function Momenti() {
   /* removes only the placed instance — the asset stays in the Stickerbook */
   const returnPlaced = (id) => {
     const s = pageStickers.find((p) => p.id === id);
-    const asset = s && getAsset(s.assetId);
+    const asset = s && resolveAsset(s.assetId);
     setPageStickers((ps) => ps.filter((p) => p.id !== id));
     showToast(`${asset ? asset.content + " " : ""}back in the Stickerbook ↩`);
   };
@@ -1081,6 +1212,20 @@ export default function Momenti() {
   const removePlaced = (id) => {
     setPageStickers((ps) => ps.filter((p) => p.id !== id));
     showToast("peeled off the page");
+  };
+  /* create a mock user sticker asset (emoji only) — enforces the free limit */
+  const createUserSticker = ({ content, texture, name }) => {
+    if (userAssets.length >= FREE_ASSET_LIMIT) {
+      showToast(`Stickerbook full — ${FREE_ASSET_LIMIT}/${FREE_ASSET_LIMIT}`);
+      return;
+    }
+    const asset = createStickerAsset({
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "emoji", source: "user", content, texture,
+      name: (name && name.trim()) || CUTE_NAMES[Math.floor(Math.random() * CUTE_NAMES.length)],
+    });
+    setUserAssets((a) => [...a, asset]);
+    showToast(`${content} added to your Stickerbook ✨`);
   };
 
   const TabBtn = ({ id, icon: Icon, label }) => (
@@ -1130,7 +1275,7 @@ export default function Momenti() {
               t={t} mode={mode} entries={entries} openDay={openDay} setOpenDay={setOpenDay}
               onOpenBook={() => setBookOpen(true)}
               placing={placingSticker} onCancelPlacing={() => setPlacingSticker(null)}
-              pageStickers={pageStickers} onPlaceAt={placeSticker}
+              pageStickers={pageStickers} resolveAsset={resolveAsset} onPlaceAt={placeSticker}
               onReturn={returnPlaced} onDuplicate={duplicatePlaced} onRemove={removePlaced}
             />
           )}
@@ -1166,7 +1311,7 @@ export default function Momenti() {
 
         {/* overlays */}
         <DaySheet day={openDay} entries={entries} t={t} onClose={() => setOpenDay(null)} />
-        {bookOpen && <StickerbookSheet t={t} page={bookPage} setPage={setBookPage} onPick={pickFromBook} onClose={() => setBookOpen(false)} />}
+        {bookOpen && <StickerbookSheet t={t} page={bookPage} setPage={setBookPage} onPick={pickFromBook} onClose={() => setBookOpen(false)} userAssets={userAssets} onCreate={createUserSticker} />}
         {shopOpen && <ShopSheet t={t} beans={beans} owned={ownedPacks} onBuy={buyPack} onClose={() => setShopOpen(false)} />}
         {logOpen && <LogModal t={t} mode={mode} decos={decos} onClose={() => setLogOpen(false)} onSave={saveEntry} />}
       </div>
