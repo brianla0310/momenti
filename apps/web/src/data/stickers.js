@@ -92,3 +92,9 @@ export function seedStickerAssets({ caffe = [], gelato = [], decos = [], decoNam
     ...decos.map((e, i) => base(`deco-${i}`, e, decoNames[i])),
   ];
 }
+
+/**
+ * Free tier: the maximum number of user-created (source:"user") sticker assets.
+ * Base and pack assets do not count against this.
+ */
+export const FREE_ASSET_LIMIT = 100;
