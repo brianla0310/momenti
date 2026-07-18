@@ -214,6 +214,9 @@ const GlobalStyle = ({ t }) => (
 
     .cp-balloon-fading { opacity: .35; transform: scale(.85); transition: all 1.2s ease; }
 
+    /* peel-back: smooth lift / settle / fly-out for placed stickers */
+    .cp-drag-settle { transition: transform .24s cubic-bezier(.34,1.56,.64,1), opacity .2s ease; }
+
     .cp-scroll { scrollbar-width: none; }
     .cp-scroll::-webkit-scrollbar { display: none; }
 
@@ -224,6 +227,7 @@ const GlobalStyle = ({ t }) => (
     @media (prefers-reduced-motion: reduce) {
       .cp-bob, .cp-pop, .cp-fadeup { animation: none !important; }
       .cp-glitter-sheen { animation: none !important; } /* static sheen */
+      .cp-drag-settle { transition: none !important; } /* instant lift/settle */
     }
   `}</style>
 );
@@ -276,8 +280,109 @@ const EntryCard = ({ e, t, i }) => (
 
 /* ═══════════════ 1 · DIARIO ═══════════════ */
 
-function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, onCancelPlacing, pageStickers, resolveAsset, onPlaceAt, onReturn, onDuplicate, onRemove }) {
+/* drop target shown while a placed sticker is lifted; highlights on hover */
+function ReturnZone({ t, active, innerRef }) {
+  return (
+    <div
+      ref={innerRef}
+      aria-hidden
+      className="cp-display cp-fadeup"
+      style={{
+        position: "fixed", left: "50%", bottom: 96, zIndex: 70,
+        transform: `translateX(-50%) scale(${active ? 1.06 : 1})`,
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "12px 20px", borderRadius: 999, pointerEvents: "none",
+        background: active ? t.accent : t.paper,
+        color: active ? "#fff" : t.ink,
+        border: `2px dashed ${active ? "#fff" : t.accent}`,
+        boxShadow: "0 10px 24px rgba(51,33,26,.3)",
+        fontSize: 13, fontWeight: 700, whiteSpace: "nowrap",
+        transition: "background .15s ease, color .15s ease, transform .15s ease",
+      }}
+    >
+      <BookOpen size={16} /> {active ? "Release to return" : "Return to stickerbook"}
+    </div>
+  );
+}
+
+const HOLD_MS = 300;       // press-and-hold to lift
+const MOVE_CANCEL = 8;     // px of movement that cancels a tap / promotes to drag
+
+function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, onCancelPlacing, pageStickers, resolveAsset, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
   const [menuFor, setMenuFor] = useState(null); // placed-sticker id with open action menu
+  const [drag, setDrag] = useState(null);       // { id, phase: pressing|lifted|returning, sx, sy, cx, cy, over, flyDx, flyDy }
+  const dragRef = useRef(null);                  // mirror of `drag` for synchronous logic (avoids nesting side effects in updaters → StrictMode-safe)
+  const holdTimer = useRef(null);
+  const cardRef = useRef(null);                  // calendar card → maps pointer to x/y %
+  const returnRef = useRef(null);                // return zone → hit-test on drop
+
+  // update ref + state together; `next` may be a value or (prev)=>value
+  const putDrag = (next) => {
+    const value = typeof next === "function" ? next(dragRef.current) : next;
+    dragRef.current = value;
+    setDrag(value);
+  };
+  const clearHold = () => { if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; } };
+
+  const onStickerDown = (e, s) => {
+    if (placing) return;                         // don't drag while placing a new sticker
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* capture unsupported */ }
+    setMenuFor(null);
+    const cx = e.clientX, cy = e.clientY;
+    putDrag({ id: s.id, phase: "pressing", sx: cx, sy: cy, cx, cy, over: false });
+    clearHold();
+    holdTimer.current = setTimeout(() => {
+      const d = dragRef.current;
+      if (d && d.id === s.id && d.phase === "pressing") putDrag({ ...d, phase: "lifted" });
+    }, HOLD_MS);
+  };
+
+  const onStickerMove = (e) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const cx = e.clientX, cy = e.clientY;
+    if (d.phase === "pressing") {
+      if (Math.hypot(cx - d.sx, cy - d.sy) > MOVE_CANCEL) { clearHold(); putDrag({ ...d, phase: "lifted", cx, cy }); } // moved before hold → lift & drag
+      else putDrag({ ...d, cx, cy });
+    } else if (d.phase === "lifted") {
+      const zr = returnRef.current?.getBoundingClientRect();
+      const pad = 24;
+      const over = !!zr && cx >= zr.left - pad && cx <= zr.right + pad && cy >= zr.top - pad && cy <= zr.bottom + pad;
+      putDrag({ ...d, cx, cy, over });
+    }
+  };
+
+  const onStickerUp = (e, s) => {
+    clearHold();
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    const d = dragRef.current;
+    if (!d || d.id !== s.id) return;
+    if (d.phase === "pressing") {                // quick tap → open the action menu
+      setMenuFor(s.id);
+      putDrag(null);
+      return;
+    }
+    if (d.phase === "lifted") {
+      if (d.over) {                              // dropped on return zone → fly-out then remove
+        const zr = returnRef.current?.getBoundingClientRect();
+        const flyDx = zr ? zr.left + zr.width / 2 - d.cx : 0;
+        const flyDy = zr ? zr.top + zr.height / 2 - d.cy : 0;
+        putDrag({ ...d, phase: "returning", flyDx, flyDy });
+        setTimeout(() => { onReturn(s.id); putDrag(null); }, 200);
+        return;
+      }
+      const rect = cardRef.current?.getBoundingClientRect();
+      if (rect) {                                // dropped on the page → move to new x/y
+        const x = ((d.cx - rect.left) / rect.width) * 100;
+        const y = ((d.cy - rect.top) / rect.height) * 100;
+        if (x >= 0 && x <= 100 && y >= 0 && y <= 100) {
+          onMove(s.id, Math.min(95, Math.max(5, x)), Math.min(93, Math.max(7, y)));
+        }
+      }
+      putDrag(null);                             // outside page & zone → just settle back
+    }
+  };
+
   const cells = [];
   for (let i = 0; i < FIRST_WEEKDAY_OFFSET; i++) cells.push(null);
   for (let d = 1; d <= DAYS_IN_MONTH; d++) cells.push(d);
@@ -323,7 +428,7 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
       )}
 
       {/* calendar */}
-      <div style={{ position: "relative", marginTop: 14, background: t.paper, borderRadius: 20, padding: "14px 10px 16px", boxShadow: "0 3px 12px rgba(51,33,26,.09)", backgroundImage: `radial-gradient(${t.accentSoft} 1px, transparent 1px)`, backgroundSize: "14px 14px" }}>
+      <div ref={cardRef} style={{ position: "relative", marginTop: 14, background: t.paper, borderRadius: 20, padding: "14px 10px 16px", boxShadow: "0 3px 12px rgba(51,33,26,.09)", backgroundImage: `radial-gradient(${t.accentSoft} 1px, transparent 1px)`, backgroundSize: "14px 14px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2, marginBottom: 6 }}>
           {["LU", "MA", "ME", "GI", "VE", "SA", "DO"].map((d, i) => (
             <div key={d} className="cp-display" style={{ textAlign: "center", fontSize: 10.5, fontWeight: 600, color: i >= 5 ? t.accent : t.sub }}>{d}</div>
@@ -371,23 +476,46 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
           })}
         </div>
 
-        {/* placed stickers (instances stuck on this page) */}
+        {/* placed stickers (instances stuck on this page) — press-hold to lift & drag */}
         {pageStickers.map((s) => {
           const asset = resolveAsset(s.assetId);
           if (!asset) return null; // unknown/removed asset → skip (stays safe on load)
+          const d = drag && drag.id === s.id ? drag : null;
+          const phase = d ? d.phase : "idle";
+          const lifted = phase === "lifted";
+          const returning = phase === "returning";
+          const floating = lifted || returning;
+          // scale/rotation per phase
+          const rot = s.rotation + (lifted ? 3 : 0);
+          const sc = returning ? 0.2 : lifted ? 1.15 : phase === "pressing" ? 0.96 : (s.scale ?? 1);
+          const transform = returning
+            ? `translate(-50%,-50%) translate(${d.flyDx}px, ${d.flyDy}px) rotate(${rot}deg) scale(${sc})`
+            : `translate(-50%,-50%) rotate(${rot}deg) scale(${sc})`;
           return (
             <button
               key={s.id}
-              onClick={() => setMenuFor(menuFor === s.id ? null : s.id)}
+              onPointerDown={(e) => onStickerDown(e, s)}
+              onPointerMove={onStickerMove}
+              onPointerUp={(e) => onStickerUp(e, s)}
+              onPointerCancel={(e) => onStickerUp(e, s)}
               aria-label={`placed sticker ${asset.name}`}
-              className="cp-pop"
+              className="cp-drag-settle"
               style={{
-                position: "absolute", left: `${s.x}%`, top: `${s.y}%`,
-                transform: `translate(-50%,-50%) rotate(${s.rotation}deg) scale(${s.scale})`,
-                lineHeight: 1, padding: 0, zIndex: 7,
-                border: "none", background: "transparent", cursor: "pointer",
+                position: floating ? "fixed" : "absolute",
+                left: floating ? d.cx : `${s.x}%`,
+                top: floating ? d.cy : `${s.y}%`,
+                transform,
+                opacity: returning ? 0 : 1,
+                zIndex: floating ? 80 : 7,
+                filter: lifted ? "drop-shadow(0 14px 16px rgba(51,33,26,.32))" : "none",
+                lineHeight: 1, padding: 0, border: "none", background: "transparent",
+                cursor: "grab", touchAction: "none",
               }}
-            ><StickerVisual asset={asset} size={30} /></button>
+            >
+              <span className="cp-pop" style={{ display: "inline-block", pointerEvents: "none" }}>
+                <StickerVisual asset={asset} size={30} />
+              </span>
+            </button>
           );
         })}
 
@@ -459,6 +587,11 @@ function Diario({ t, mode, entries, openDay, setOpenDay, onOpenBook, placing, on
           </div>
         )}
       </div>
+
+      {/* peel-back drop target, only while a sticker is lifted */}
+      {drag && (drag.phase === "lifted" || drag.phase === "returning") && (
+        <ReturnZone t={t} active={!!drag.over} innerRef={returnRef} />
+      )}
     </div>
   );
 }
@@ -1238,6 +1371,10 @@ export default function Momenti() {
     setPageStickers((ps) => ps.filter((p) => p.id !== id));
     showToast("peeled off the page");
   };
+  /* peel-back drag: update a placed instance's position (percent coords) */
+  const moveSticker = (id, x, y) => {
+    setPageStickers((ps) => ps.map((p) => (p.id === id ? { ...p, x, y } : p)));
+  };
   /* create a mock user sticker asset (emoji only) — enforces the free limit */
   const createUserSticker = ({ content, texture, name }) => {
     if (userAssets.length >= FREE_ASSET_LIMIT) {
@@ -1301,6 +1438,7 @@ export default function Momenti() {
               onOpenBook={() => setBookOpen(true)}
               placing={placingSticker} onCancelPlacing={() => setPlacingSticker(null)}
               pageStickers={pageStickers} resolveAsset={resolveAsset} onPlaceAt={placeSticker}
+              onMove={moveSticker}
               onReturn={returnPlaced} onDuplicate={duplicatePlaced} onRemove={removePlaced}
             />
           )}
