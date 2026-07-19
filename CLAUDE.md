@@ -11,8 +11,10 @@ The product feeling is:
 Korean diary deco (다꾸) × tactile paper/sticker UI. (Italian bar/gelato is just one optional theme.)
 
 Two core pillars:
-- **Sticker system** — photo → on-device cutout → sticker; user-made stickers; packs; paper/glitter texture; creator marketplace (later)
-- **Diary decorating** — tactile 다꾸: calendar (month/week), full-screen day pages, text boxes, fonts, inner-paper templates (속지), day thumbnails, multiple diaries as books
+- **Sticker system** — photo → sticker in **two styles from day one: polaroid (no cutout, white border + rounded corners) + die-cut (on-device cutout)**; user-made stickers; packs; paper/glitter texture; creator marketplace (later). Photos live in IndexedDB, resized to 1080px on import.
+- **Diary decorating** — tactile 다꾸: month/week calendar (week = **navigation only**), full-screen **3:4** day pages, minimal text boxes, fonts, **3 fixed 속지 presets** (daily / travel / moodboard — no template engine in v1), day thumbnails, multiple diaries as books
+
+**v1 is locked** — see `docs/product.md` → "★ v1 Locked Decisions (D1–D15)". Design philosophy: **"Analog soul, digital superpowers"** — obsessively mimic the physics/materiality of real paper (behavior over ornament; a paper page-turn on every nav; interactions <100ms, animations 60fps or simplified; prefers-reduced-motion always respected), while adding digital superpowers (infinite reuse, undo, everything backed up). **No consumable per-use sticker counts, ever** — the 100-asset limit is a created-asset storage/business cap only.
 
 Social is a **future, backend-gated layer** (after Supabase), not a current pillar: friends, diary sharing, guestbook (방명록), exchange diary (교환일기), and a **friends-only Moments Map** (the live bubble map returns here — friend density solves cold start).
 
@@ -29,6 +31,8 @@ Avoid:
 - Instagram-like public profile grid
 - Google Maps / fintech / utility-map look
 - game-economy / currency-heavy UI
+- consumable per-use sticker counts ("×N uses") — every asset is infinitely reusable
+- kitsch fake textures (fake leather) — mimic paper's behavior, not surface skins
 
 ## Current state (on main — JSX-first prototype)
 
@@ -42,22 +46,23 @@ Implemented and merged:
 7. User-created stickers (emoji mock) + free 100-asset limit; paper/glitter texture.
 8. Glitter rendering (holographic sheen) via a shared `StickerVisual` component.
 9. Peel-back: press-and-hold to lift, drag to move, drop on a return zone to send back to the Stickerbook (tap still opens the action menu).
+10. De-scope to the sticker-diary core (PR #10): removed the Map tab + bubbles, neighborhood stamps, badges/keepsakes, drink log flow; caffe/gelato mode toggle → month/week toggle (week = navigation only); Bookshelf placeholder tab; Beans UI + public/private flag removed from view (data kept).
 
-Still mock / not built: real photo upload + on-device cutout (emoji stand in), full-screen day pages, multiple diaries, any backend.
+Still mock / not built: real photo upload + two sticker styles (emoji stand in), full-screen day pages (`PageElement` model + storage v3), 3 속지 presets, multiple diaries, image export, any backend.
 
 ## Next (local-first, no backend)
 
-1. De-scope: remove the Map tab + bubble system, neighborhood stamps, badges/keepsakes, and the drink log flow (`+` becomes "add a photo/sticker to today"); replace the caffe/gelato mode toggle with a **month/week** toggle; make the **Beans UI dormant** (keep the data model, hide the currency counter + shop).
-2. Full-screen day deco mode MVP (stickers + text boxes, free-form layout).
+1. De-scope (done, PR #10): Map tab + bubbles, stamps, badges/keepsakes, drink log flow removed; caffe/gelato toggle → month/week (week = navigation only); Beans + public/private UI removed from view (data kept).
+2. Full-screen day deco mode MVP — **3:4** page, stickers + **minimal** text boxes, unified `PageElement` model, undo, storage **v3** migration.
 3. Day thumbnails in calendar cells.
-4. Photo upload + on-device background removal (cutout) — the heart of the product.
-5. 속지 template engine + fonts (categories are templates, not features).
-6. Multiple diaries + Bookshelf tab (local).
-7. Image export (day page / month view as a shareable image with a small "made with Momenti" mark).
+4. Photo upload + **two sticker styles** (polaroid + die-cut cutout), IndexedDB, 1080px — the heart of the product. Replaces the emoji creator; the 100-limit is revisited as a storage-based cap.
+5. **3 fixed 속지 presets** (daily / travel / moodboard, no engine) + fonts + **Moka default sticker pack** assets.
+6. Image export + **Moka corner mark** (1080×1440, optional 9:16) = **🚩 V1 LAUNCH LINE**.
+7. Multiple diaries + Bookshelf expansion (acceptable as **v1.1**).
 
 Backend-gated (needs Supabase/accounts): 8) Supabase + accounts, 9) friends + diary sharing + guestbook + exchange diary, 10) friends-only Moments Map, 11) creator marketplace (stickers + 속지 templates) + IAP, 12) Moka features, AR experiments.
 
-**To remove in upcoming code work** (document only — do not remove code preemptively): Map tab + bubble system; neighborhood stamps + badges/keepsakes; drink log flow (hearts / cafe chips / drink picker); caffe/gelato mode toggle; Beans currency UI (dormant).
+**Removed in the de-scope (PR #10):** Map tab + bubble system; neighborhood stamps + badges/keepsakes; drink log flow (hearts / cafe chips / drink picker); caffe/gelato mode toggle; Beans currency UI (dormant — data kept); public/private flag UI (returns with sharing/backend).
 
 **Keep unchanged:** Moka mascot worldview; tactile / anti-utilitarian principles (no ratings, no follower counts as identity, no fintech/utility-map look); the avoid-list; JSX-first prototype approach; small-PR workflow.
 
