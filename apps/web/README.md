@@ -1,75 +1,53 @@
-# React + TypeScript + Vite
+# Momenti — web app
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Momenti web app: a Vite + React (JSX-first) prototype. All state lives in the
+browser's `localStorage` — there is no backend, no accounts, no build-time secrets.
 
-Currently, two official plugins are available:
+TypeScript migration is intentionally deferred; the code is JSX with JSDoc types.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Commands
 
-## React Compiler
+Run all commands **from this `apps/web` folder**:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+npm install      # install dependencies (first time / after lockfile changes)
+npm run dev      # start the dev server — Vite prints the localhost URL in the terminal
+npm run lint     # run eslint
+npm run build    # production build (runs `tsc -b` then `vite build`)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+- Stop the dev server with **Ctrl + C** in its terminal.
+- There is no test script in `package.json` yet.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Local data
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+The app persists a single blob under the `localStorage` key `momenti.v1`
+(storage schema **v3**). **Clearing site data / localStorage deletes your local
+diary** (placed stickers, text, pages). Old blobs migrate forward (v1→v2→v3) on
+load; corrupt/unknown data falls back to seed defaults silently.
 
+## Manual test checklist
+
+After changes, sanity-check in the browser:
+
+- **Diary:** month/week toggle; a day cell opens the full-screen day page (past/today only; future days disabled).
+- **Day page:** opens with a paper page-turn; the 3:4 canvas is centered/letterboxed; the close button returns to the calendar.
+- **Stickers:** "Add stickers" opens the Stickerbook overlay; picking a sticker → tap the page to place it; hold-lift-drag to move; drop on the return zone to send it back.
+- **Text:** "Text" adds a note; tap to edit (font / color / size / delete toolbar); hold to move; empty notes disappear on blur.
+- **Undo/redo:** the day-page undo/redo buttons and Ctrl/Cmd+Z reflect add / move / delete / text edits instantly.
+- **Persistence:** reload the page — placements and text survive.
+- **Bookshelf tab** and the **`+`** button still work.
+- **Reduced motion:** with `prefers-reduced-motion`, the page-turn simplifies to a fade and everything still works.
+
+## Structure
+
+```
+src/
+  App.jsx                 # the whole app (JSX-first prototype)
+  data/
+    stickers.js           # StickerAsset model + seed
+    pageElements.js       # unified PageElement model (sticker / text)
+  components/
+    StickerVisual.jsx     # shared sticker renderer (paper / glitter)
+  design/                 # design tokens: tokens, typography, shadows, motion
 ```

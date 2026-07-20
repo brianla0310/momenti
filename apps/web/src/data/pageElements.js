@@ -7,8 +7,8 @@
 //  NEVER as parallel systems.
 //
 //  type payloads:
-//    "sticker" → { assetId }            (references StickerAsset.id)
-//    "text"    → reserved for the next PR (type value defined, nothing built)
+//    "sticker" → { assetId }                              (references StickerAsset.id)
+//    "text"    → { content, font, color, sizeLevel }      (day pages only, minimal spec)
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -16,12 +16,16 @@
  * @typedef {Object} PageElement
  * @property {string} id
  * @property {"sticker"|"text"} type
- * @property {number} x         - percent across the surface (0–100)
- * @property {number} y         - percent down the surface (0–100)
- * @property {number} rotation  - degrees
- * @property {number} scale     - 1 = natural size
- * @property {number} z         - stacking order within the surface
- * @property {string} [assetId] - sticker payload
+ * @property {number} x           - percent across the surface (0–100)
+ * @property {number} y           - percent down the surface (0–100)
+ * @property {number} rotation    - degrees
+ * @property {number} scale       - 1 = natural size
+ * @property {number} z           - stacking order within the surface
+ * @property {string} [assetId]   - sticker payload
+ * @property {string} [content]   - text payload: the note text
+ * @property {string} [font]      - text payload: font key
+ * @property {string} [color]     - text payload: ink color
+ * @property {string} [sizeLevel] - text payload: "S" | "M" | "L"
  */
 
 let idCounter = 0;
