@@ -5,11 +5,12 @@
 //  photo-cutout stickers. Coffee/gelato is just an optional theme.
 // ─────────────────────────────────────────────────────────────
 import { useState, useEffect, useRef } from "react";
-import { BookOpen, Library, Plus, X } from "lucide-react";
+import { BookOpen, Library, Plus, X, Undo2, Redo2 } from "lucide-react";
 // Design tokens (future source of truth). App.jsx is still JSX-first and mostly
-// inlines its own values; this wires in the font stacks and sticker rotation range.
+// inlines its own values; this wires in the font stacks, sticker rotation range,
+// and the warm ink palette for text elements.
 import { FONTS } from "./design/typography";
-import { STICKER } from "./design/tokens";
+import { STICKER, COLORS } from "./design/tokens";
 import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSET_LIMIT } from "./data/stickers";
 import { createPageElement } from "./data/pageElements";
 import StickerVisual from "./components/StickerVisual";
@@ -74,6 +75,17 @@ const MONTH_NAME = "luglio";
 const dayKeyFor = (d) => `${MONTH_KEY}-${String(d).padStart(2, "0")}`;
 const BOOK_PAGE_SIZE = 8;
 
+/* text elements (day pages only, §D6 — deliberately minimal, nothing more):
+   3 fonts × 5 warm inks × 3 sizes. No bold/italic, no alignment, no links. */
+const TEXT_FONTS = {
+  hand: { label: "Hand", stack: "'Caveat', 'Fredoka', cursive" },        // cute handwriting default
+  round: { label: "Round", stack: FONTS.display.stack },                  // Fredoka (design token)
+  clean: { label: "Clean", stack: FONTS.body.stack },                     // Nunito (design token)
+};
+const TEXT_COLORS = [COLORS.espresso, COLORS.bialettiRed, COLORS.pistacchio, COLORS.azzurro, COLORS.amarena];
+const TEXT_SIZES = { S: 14, M: 19, L: 26 };
+const UNDO_CAP = 50;
+
 /* mock "make a sticker" creator: curated fun emoji + cute default names.
    No real image upload — emoji content only for now. */
 const CREATOR_EMOJI = ["🌈", "⭐", "💖", "🔥", "🌸", "🍀", "🦋", "🐱", "🌙", "☁️", "🍩", "🧁", "🎀", "👑", "💎", "🍭", "🌵", "🐳", "🍄", "⚡"];
@@ -101,7 +113,7 @@ const randomTilt = () => {
 /* ---------- global css ---------- */
 const GlobalStyle = ({ t }) => (
   <style>{`
-    @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&family=Caveat:wght@500;600&display=swap');
 
     .cp-root { font-family: ${FONTS.body.stack}; }
     .cp-display { font-family: ${FONTS.display.stack}; }
@@ -245,12 +257,13 @@ function PlacingHint({ t, placing, onCancel, style }) {
    and the tap-to-place capture layer. Both deco surfaces (monthly
    spread + day pages) render through this — never fork it.
    Mount INSIDE a position:relative surface container; pass its ref. */
-function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, stickerSize = 30, radius = 20 }) {
+function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, onUpdate = () => {}, editingTextId = null, onEditText = () => {}, stickerSize = 30, radius = 20 }) {
   const [menuFor, setMenuFor] = useState(null); // element id with open action menu
   const [drag, setDrag] = useState(null);       // { id, phase: pressing|lifted|returning, sx, sy, cx, cy, over, flyDx, flyDy }
   const dragRef = useRef(null);                  // mirror of `drag` for synchronous logic (StrictMode-safe)
   const holdTimer = useRef(null);
   const returnRef = useRef(null);                // return zone → hit-test on drop
+  const textRef = useRef(null);                  // textarea of the text editor (uncontrolled draft)
 
   // update ref + state together; `next` may be a value or (prev)=>value
   const putDrag = (next) => {
@@ -293,8 +306,9 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
     const d = dragRef.current;
     if (!d || d.id !== s.id) return;
-    if (d.phase === "pressing") {                // quick tap → open the action menu
-      setMenuFor(s.id);
+    if (d.phase === "pressing") {                // quick tap → text edits, stickers get the action menu
+      if (s.type === "text") onEditText(s.id);
+      else setMenuFor(s.id);
       putDrag(null);
       return;
     }
@@ -323,11 +337,29 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
 
   return (
     <>
-      {/* placed elements — press-hold to lift & drag (sticker type only for now) */}
+      {/* placed elements — press-hold to lift & drag; tap = menu (sticker) / edit (text) */}
       {sorted.map((s) => {
-        if (s.type !== "sticker") return null;   // "text" arrives next PR (§D3)
-        const asset = resolveAsset(s.assetId);
-        if (!asset) return null;                 // unknown/removed asset → skip (stays safe on load)
+        let inner = null;
+        let label = "";
+        if (s.type === "sticker") {
+          const asset = resolveAsset(s.assetId);
+          if (!asset) return null;               // unknown/removed asset → skip (stays safe on load)
+          inner = <StickerVisual asset={asset} size={stickerSize} />;
+          label = `placed sticker ${asset.name}`;
+        } else if (s.type === "text") {
+          if (s.id === editingTextId) return null; // the editor replaces the idle box
+          inner = (
+            <span style={{
+              display: "inline-block", maxWidth: 220, whiteSpace: "pre-wrap", textAlign: "left",
+              fontFamily: TEXT_FONTS[s.font]?.stack ?? TEXT_FONTS.hand.stack,
+              color: s.color, fontSize: TEXT_SIZES[s.sizeLevel] ?? TEXT_SIZES.M,
+              lineHeight: 1.25, fontWeight: 600,
+            }}>{s.content}</span>
+          );
+          label = "placed text note";
+        } else {
+          return null;                            // future types land here (§D3)
+        }
         const d = drag && drag.id === s.id ? drag : null;
         const phase = d ? d.phase : "idle";
         const lifted = phase === "lifted";
@@ -345,7 +377,7 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
             onPointerMove={onStickerMove}
             onPointerUp={(e) => onStickerUp(e, s)}
             onPointerCancel={(e) => onStickerUp(e, s)}
-            aria-label={`placed sticker ${asset.name}`}
+            aria-label={label}
             className="cp-drag-settle"
             style={{
               position: floating ? "fixed" : "absolute",
@@ -360,7 +392,7 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
             }}
           >
             <span className="cp-pop" style={{ display: "inline-block", pointerEvents: "none" }}>
-              <StickerVisual asset={asset} size={stickerSize} />
+              {inner}
             </span>
           </button>
         );
@@ -402,6 +434,85 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
                   <span style={{ width: 14, textAlign: "center" }}>{icon}</span> {label}
                 </button>
               ))}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* text editor: tap a text box → in-place textarea + minimal toolbar (§D6:
+          3 fonts × 5 inks × 3 sizes + delete. no bold/italic/alignment/links) */}
+      {editingTextId != null && (() => {
+        const el = elements.find((p) => p.id === editingTextId && p.type === "text");
+        if (!el) return null;
+        const below = el.y < 50; // toolbar goes under the box when it sits high
+        const commit = () => {
+          const v = (textRef.current?.value ?? "").trim();
+          if (!v) onRemove(el.id, true);                 // empty on close → removed quietly
+          else if (v !== el.content) onUpdate(el.id, { content: v });
+          onEditText(null);
+        };
+        const chip = (active) => ({
+          border: active ? `2px solid ${t.accent}` : "2px solid transparent",
+          background: t.bg, borderRadius: 9, padding: "3px 7px", cursor: "pointer",
+          fontSize: 12, fontWeight: 700, color: t.ink, lineHeight: 1.2,
+        });
+        return (
+          <>
+            {/* commit-catcher: clicking anywhere else on the surface closes the editor */}
+            <div onClick={commit} style={{ position: "absolute", inset: 0, zIndex: 13 }} />
+            <div style={{ position: "absolute", zIndex: 14, left: `${Math.min(72, Math.max(28, el.x))}%`, top: `${el.y}%`, transform: "translate(-50%,-50%)" }}>
+              <textarea
+                ref={textRef}
+                autoFocus
+                defaultValue={el.content}
+                rows={2}
+                aria-label="edit text note"
+                onBlur={(e) => { if (e.relatedTarget?.closest?.("[data-text-toolbar]")) return; commit(); }}
+                onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); commit(); } }}
+                style={{
+                  width: 210, resize: "none", outlineOffset: 0,
+                  fontFamily: TEXT_FONTS[el.font]?.stack ?? TEXT_FONTS.hand.stack,
+                  color: el.color, fontSize: TEXT_SIZES[el.sizeLevel] ?? TEXT_SIZES.M,
+                  lineHeight: 1.25, fontWeight: 600,
+                  background: "rgba(255,251,242,.94)", border: `1.5px dashed ${t.accent}`,
+                  borderRadius: 10, padding: "7px 9px",
+                }}
+              />
+              {/* toolbar: pointerDown is prevented so taps never blur the textarea */}
+              <div
+                data-text-toolbar
+                onPointerDown={(e) => e.preventDefault()}
+                className="cp-pop"
+                style={{
+                  position: "absolute", left: "50%", ...(below ? { top: "100%", marginTop: 6 } : { bottom: "100%", marginBottom: 6 }),
+                  transform: "translateX(-50%)",
+                  background: t.paper, borderRadius: 12, padding: 6,
+                  border: `1.5px solid ${t.accentSoft}`, boxShadow: "0 6px 18px rgba(51,33,26,.25)",
+                  display: "flex", flexDirection: "column", gap: 5, width: 196,
+                }}
+              >
+                <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                  {Object.entries(TEXT_FONTS).map(([k, f]) => (
+                    <button key={k} onClick={() => onUpdate(el.id, { font: k })} aria-label={`font ${f.label}`} style={{ ...chip(el.font === k), fontFamily: f.stack }}>{f.label}</button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "center" }}>
+                  {TEXT_COLORS.map((c) => (
+                    <button key={c} onClick={() => onUpdate(el.id, { color: c })} aria-label={`ink ${c}`} style={{
+                      width: 18, height: 18, borderRadius: "50%", background: c, cursor: "pointer",
+                      border: el.color === c ? "2.5px solid #fff" : "2.5px solid transparent",
+                      boxShadow: el.color === c ? `0 0 0 2px ${t.accent}` : "0 1px 3px rgba(51,33,26,.25)",
+                    }} />
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center" }}>
+                  {Object.keys(TEXT_SIZES).map((k) => (
+                    <button key={k} onClick={() => onUpdate(el.id, { sizeLevel: k })} aria-label={`size ${k}`} style={chip(el.sizeLevel === k)}>{k}</button>
+                  ))}
+                  <span style={{ width: 1, height: 16, background: t.accentSoft, margin: "0 3px" }} />
+                  <button onClick={() => { onRemove(el.id); onEditText(null); }} aria-label="delete text note" style={{ ...chip(false), color: t.accent }}>🗑</button>
+                </div>
+              </div>
             </div>
           </>
         );
@@ -555,7 +666,7 @@ function Diary({ t, view, monthElements, resolveAsset, onOpenBook, onOpenDay, pl
 
 const PAGE_TURN_MS = 480; // matches .cp-pageturn-* durations (+ small buffer)
 
-function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, onOpenBook, onClose }) {
+function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, onUpdate, editingTextId, onEditText, onAddText, canUndo, onUndo, canRedo, onRedo, onOpenBook, onClose }) {
   const [phase, setPhase] = useState("opening"); // opening → open → closing
   const canvasRef = useRef(null);
 
@@ -587,15 +698,28 @@ function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onP
       {/* the turning page (3D rotate from the left spine + traveling shadow) */}
       <div className={turnClass} onAnimationEnd={handleTurnEnd} style={{ position: "absolute", inset: 0, background: t.bg, display: "flex", flexDirection: "column" }}>
 
-        {/* date header */}
+        {/* date header + undo/redo */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px 8px" }}>
           <button onClick={requestClose} aria-label="close day page" style={{ border: "none", background: t.paper, borderRadius: 12, width: 34, height: 34, cursor: "pointer", color: t.ink, boxShadow: "0 2px 6px rgba(51,33,26,.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <X size={17} />
           </button>
-          <div>
+          <div style={{ flex: 1 }}>
             <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink, lineHeight: 1.1 }}>{day} {MONTH_NAME}</div>
             <div style={{ fontSize: 10.5, color: t.sub, fontWeight: 700 }}>Luglio 2026 · day page</div>
           </div>
+          {[
+            ["undo", Undo2, canUndo, onUndo],
+            ["redo", Redo2, canRedo, onRedo],
+          ].map(([label, Icon, can, act]) => (
+            <button key={label} onClick={act} disabled={!can} aria-label={label} style={{
+              border: "none", background: t.paper, borderRadius: 12, width: 34, height: 34,
+              cursor: can ? "pointer" : "default", color: can ? t.ink : "rgba(0,0,0,.22)",
+              boxShadow: can ? "0 2px 6px rgba(51,33,26,.1)" : "none",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Icon size={16} />
+            </button>
+          ))}
         </div>
 
         {/* 3:4 canvas, centered/letterboxed (§D1) */}
@@ -623,21 +747,31 @@ function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onP
               t={t} surfaceRef={canvasRef} elements={elements} resolveAsset={resolveAsset}
               placing={placing} onPlaceAt={onPlaceAt} onMove={onMove}
               onReturn={onReturn} onDuplicate={onDuplicate} onRemove={onRemove}
+              onUpdate={onUpdate} editingTextId={editingTextId} onEditText={onEditText}
               stickerSize={40} radius={18}
             />
           </div>
         </div>
 
-        {/* footer: stickerbook affordance targeting THIS page */}
+        {/* footer: sticker + text affordances targeting THIS page */}
         <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
           {placing && <PlacingHint t={t} placing={placing} onCancel={onCancelPlacing} />}
-          <button onClick={onOpenBook} className="cp-display" style={{
-            border: "none", borderRadius: 999, padding: "12px 0", width: "100%",
-            background: t.accent, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer",
-            boxShadow: "0 5px 14px rgba(200,51,27,.3)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          }}>
-            📒 Add stickers to this page
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onOpenBook} className="cp-display" style={{
+              flex: 1.6, border: "none", borderRadius: 999, padding: "12px 0",
+              background: t.accent, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer",
+              boxShadow: "0 5px 14px rgba(200,51,27,.3)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            }}>
+              📒 Add stickers
+            </button>
+            <button onClick={onAddText} aria-label="add text note" className="cp-display" style={{
+              flex: 1, border: `2px dashed ${t.accent}`, borderRadius: 999, padding: "10px 0",
+              background: t.paper, color: t.accent, fontSize: 14, fontWeight: 700, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}>
+              ✏️ Text
+            </button>
+          </div>
         </div>
 
         {/* traveling shadow while the page turns */}
@@ -958,6 +1092,16 @@ export default function Momenti() {
   const [bookPage, setBookPage] = useState(0);
   const [placingSticker, setPlacingSticker] = useState(null); // peeled asset waiting for a tap on the active surface
   const [userAssets, setUserAssets] = useState(saved?.userAssets ?? []); // user-made StickerAssets (source:"user")
+  const [editingTextId, setEditingTextId] = useState(null); // text element in edit mode (day pages only)
+
+  /* undo/redo — snapshot stacks of the OPEN day page's elements (§D15).
+     Session-scoped: cleared when the page opens/closes. Refs are the source
+     of truth (no side effects inside state updaters → StrictMode-safe);
+     histVer only re-renders the buttons' disabled state. */
+  const undoRef = useRef([]);
+  const redoRef = useRef([]);
+  const [, setHistVer] = useState(0);
+  const bumpHist = () => setHistVer((v) => v + 1);
 
   const t = THEME;
 
@@ -1004,12 +1148,17 @@ export default function Momenti() {
     showToast(`${placingSticker.content} stuck! ✨`);
     setPlacingSticker(null);
   };
-  /* removes only the placed element — the asset stays in the Stickerbook */
+  /* removes only the placed element — sticker assets stay in the Stickerbook;
+     dropping a text box on the return zone simply deletes it */
   const returnElement = (pageKey, id) => {
     const s = elementsOf(pageKey).find((p) => p.id === id);
-    const asset = s && resolveAsset(s.assetId);
     setElements(pageKey, (els) => els.filter((p) => p.id !== id));
-    showToast(`${asset ? asset.content + " " : ""}back in the Stickerbook ↩`);
+    if (s?.type === "text") {
+      showToast("✏️ note peeled away");
+    } else {
+      const asset = s && resolveAsset(s.assetId);
+      showToast(`${asset ? asset.content + " " : ""}back in the Stickerbook ↩`);
+    }
   };
   const duplicateElement = (pageKey, id) => {
     setElements(pageKey, (els) => {
@@ -1024,24 +1173,95 @@ export default function Momenti() {
     });
     showToast("⧉ stuck a copy!");
   };
-  const removeElement = (pageKey, id) => {
+  const removeElement = (pageKey, id, quiet = false) => {
     setElements(pageKey, (els) => els.filter((p) => p.id !== id));
-    showToast("peeled off the page");
+    if (!quiet) showToast("peeled off the page");
   };
   /* peel-back drag: update a placed element's position (percent coords) */
   const moveElement = (pageKey, id, x, y) => {
     setElements(pageKey, (els) => els.map((p) => (p.id === id ? { ...p, x, y } : p)));
   };
+  /* patch any element (text content/font/color/size — one model, §D3) */
+  const updateElement = (pageKey, id, patch) => {
+    setElements(pageKey, (els) => els.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  };
+  /* new text box near center, slight tilt for the handwritten feel (§D14) */
+  const createTextElement = (pageKey) => {
+    const el = createPageElement({
+      type: "text", content: "", font: "hand", color: TEXT_COLORS[0], sizeLevel: "M",
+      x: 50 + (Math.random() * 10 - 5), y: 42 + (Math.random() * 10 - 5),
+      rotation: Math.random() * 5 - 2.5, scale: 1,
+      z: elementsOf(pageKey).reduce((m, e) => Math.max(m, e.z ?? 0), 0) + 1,
+    });
+    setElements(pageKey, (els) => [...els, el]);
+    setEditingTextId(el.id); // straight into edit mode
+  };
+
+  /* ── undo/redo for the open day page (§D15) — snapshot stacks, cap 50 ── */
+  const pushDayUndo = (pageKey) => {
+    undoRef.current = [...undoRef.current.slice(-(UNDO_CAP - 1)), elementsOf(pageKey)];
+    redoRef.current = [];
+    bumpHist();
+  };
+  const undoDay = () => {
+    if (openDay == null || !undoRef.current.length) return;
+    const key = dayKeyFor(openDay);
+    const snapshot = undoRef.current[undoRef.current.length - 1];
+    undoRef.current = undoRef.current.slice(0, -1);
+    redoRef.current = [...redoRef.current, elementsOf(key)];
+    setEditingTextId(null);
+    setElements(key, snapshot);
+    bumpHist();
+  };
+  const redoDay = () => {
+    if (openDay == null || !redoRef.current.length) return;
+    const key = dayKeyFor(openDay);
+    const snapshot = redoRef.current[redoRef.current.length - 1];
+    redoRef.current = redoRef.current.slice(0, -1);
+    undoRef.current = [...undoRef.current.slice(-(UNDO_CAP - 1)), elementsOf(key)];
+    setEditingTextId(null);
+    setElements(key, snapshot);
+    bumpHist();
+  };
+  const clearDayHistory = () => { undoRef.current = []; redoRef.current = []; bumpHist(); };
+
   /* bind the shared handlers to one surface for an ElementLayer */
-  const surfaceHandlers = (pageKey) => ({
-    placing: placingSticker,
-    onCancelPlacing: () => setPlacingSticker(null),
-    onPlaceAt: (x, y) => placeElement(pageKey, x, y),
-    onMove: (id, x, y) => moveElement(pageKey, id, x, y),
-    onReturn: (id) => returnElement(pageKey, id),
-    onDuplicate: (id) => duplicateElement(pageKey, id),
-    onRemove: (id) => removeElement(pageKey, id),
-  });
+  const surfaceHandlers = (pageKey, { undoable = false } = {}) => {
+    const withUndo = (fn) => (...args) => { if (undoable) pushDayUndo(pageKey); fn(...args); };
+    return {
+      placing: placingSticker,
+      onCancelPlacing: () => setPlacingSticker(null),
+      onPlaceAt: withUndo((x, y) => placeElement(pageKey, x, y)),
+      onMove: withUndo((id, x, y) => moveElement(pageKey, id, x, y)),
+      onReturn: withUndo((id) => returnElement(pageKey, id)),
+      onDuplicate: withUndo((id) => duplicateElement(pageKey, id)),
+      // quiet removals (empty text boxes cleaned on blur) skip toast AND undo
+      onRemove: (id, quiet = false) => { if (undoable && !quiet) pushDayUndo(pageKey); removeElement(pageKey, id, quiet); },
+      onUpdate: withUndo((id, patch) => updateElement(pageKey, id, patch)),
+    };
+  };
+  /* day page open/close resets the session-scoped history + edit mode */
+  const openDayPage = (d) => { clearDayHistory(); setEditingTextId(null); setOpenDay(d); };
+  const closeDayPage = () => { clearDayHistory(); setEditingTextId(null); setOpenDay(null); };
+
+  /* Ctrl/Cmd+Z (undo) · +Shift or Ctrl+Y (redo) while a day page is open.
+     Typing in the textarea keeps the browser's native text undo. */
+  const undoDayRef = useRef(undoDay); undoDayRef.current = undoDay;
+  const redoDayRef = useRef(redoDay); redoDayRef.current = redoDay;
+  useEffect(() => {
+    if (openDay == null) return;
+    const onKey = (e) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const tag = e.target?.tagName;
+      if (tag === "TEXTAREA" || tag === "INPUT") return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); undoDayRef.current(); }
+      else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); redoDayRef.current(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openDay]);
+
   /* create a mock user sticker asset (emoji only) — enforces the free limit */
   const createUserSticker = ({ content, texture, name }) => {
     if (userAssets.length >= FREE_ASSET_LIMIT) {
@@ -1099,7 +1319,7 @@ export default function Momenti() {
               t={t} view={calendarView}
               monthElements={elementsOf(MONTH_KEY)} resolveAsset={resolveAsset}
               onOpenBook={() => setBookOpen(true)}
-              onOpenDay={(d) => setOpenDay(d)}
+              onOpenDay={openDayPage}
               {...surfaceHandlers(MONTH_KEY)}
             />
           )}
@@ -1113,8 +1333,12 @@ export default function Momenti() {
             t={t} day={openDay}
             elements={elementsOf(dayKeyFor(openDay))} resolveAsset={resolveAsset}
             onOpenBook={() => setBookOpen(true)}
-            onClose={() => setOpenDay(null)}
-            {...surfaceHandlers(dayKeyFor(openDay))}
+            onClose={closeDayPage}
+            editingTextId={editingTextId} onEditText={setEditingTextId}
+            onAddText={() => { pushDayUndo(dayKeyFor(openDay)); createTextElement(dayKeyFor(openDay)); }}
+            canUndo={undoRef.current.length > 0} onUndo={undoDay}
+            canRedo={redoRef.current.length > 0} onRedo={redoDay}
+            {...surfaceHandlers(dayKeyFor(openDay), { undoable: true })}
           />
         )}
 
