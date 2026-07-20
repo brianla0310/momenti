@@ -15,6 +15,7 @@ import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSE
 import { createPageElement } from "./data/pageElements";
 import StickerVisual from "./components/StickerVisual";
 import DayThumbnail from "./components/DayThumbnail";
+import { createCalendarContext, getWeekDayNumbers, isFutureLocalDay } from "./calendar/dateUtils";
 
 /* ---------- theme tokens ---------- */
 /* single warm palette (the old caffe theme); gelato branch removed in the
@@ -69,11 +70,18 @@ const STICKER_ASSETS = seedStickerAssets({
 }).map((a) => (GLITTER_BASE_IDS.has(a.id) ? { ...a, texture: "glitter" } : a));
 const ASSET_BY_ID = Object.fromEntries(STICKER_ASSETS.map((a) => [a.id, a]));
 /* Single diary until the multiple-diaries PR (§D4) — structure is v3-ready.
-   Surfaces are keyed pages: "2026-07" = monthly spread, "2026-07-15" = a day page. */
+   Surfaces are keyed pages: the monthly spread is "YYYY-MM" (e.g. "2026-07")
+   and each day page is "YYYY-MM-DD" (e.g. "2026-07-15"). */
 const DIARY_ID = "diary-1";
-const MONTH_KEY = "2026-07";
-const MONTH_NAME = "luglio";
-const dayKeyFor = (d) => `${MONTH_KEY}-${String(d).padStart(2, "0")}`;
+/* live calendar frame from the browser's LOCAL date, captured once at load
+   (a stable session snapshot — no midnight auto-roll; that's a later item).
+   Injectable base date + all date math live in ./calendar/dateUtils. */
+const CAL = createCalendarContext();
+/* legacy monthly-spread key: pre-local-date data (v1/v2) was placed on the
+   fixed 2026-07 spread. Migrations preserve that historical key verbatim —
+   they never move old placements onto the current local month. */
+const LEGACY_MONTH_KEY = "2026-07";
+const dayKeyFor = (d) => `${CAL.monthKey}-${String(d).padStart(2, "0")}`;
 const BOOK_PAGE_SIZE = 8;
 
 /* text elements (day pages only, §D6 — deliberately minimal, nothing more):
@@ -98,10 +106,8 @@ const PACKS = [
   { id: "ferra", name: "Ferragosto · limitata!", items: ["🌞", "🍑", "🎆"], price: 20, limited: true },
 ];
 
-/* calendar frame: luglio 2026, oggi = 15 */
-const TODAY = 15;
-const DAYS_IN_MONTH = 31;
-const FIRST_WEEKDAY_OFFSET = 2; // 1 luglio 2026 = mercoledì (settimana da lunedì)
+/* calendar frame (today, days-in-month, Monday-first offset of the 1st) is
+   derived from the local date in CAL — see ./calendar/dateUtils. */
 
 /* random helpers (deterministic-ish tilt per index) */
 const tiltFor = (i) => ((i * 47) % 17) - 8;
@@ -541,20 +547,16 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
   );
 }
 
-function Diary({ t, view, monthElements, dayElements, resolveAsset, onOpenBook, onOpenDay, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
+function Diary({ t, view, cal, monthElements, dayElements, resolveAsset, onOpenBook, onOpenDay, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
   const cardRef = useRef(null); // calendar card = the monthly-spread surface
 
+  // current local month: leading blanks up to the 1st's weekday, then its days
   const cells = [];
-  for (let i = 0; i < FIRST_WEEKDAY_OFFSET; i++) cells.push(null);
-  for (let d = 1; d <= DAYS_IN_MONTH; d++) cells.push(d);
+  for (let i = 0; i < cal.firstWeekdayOffset; i++) cells.push(null);
+  for (let d = 1; d <= cal.daysInMonth; d++) cells.push(d);
 
-  // week strip: the 7 days of the week containing TODAY (groundwork for day thumbnails)
-  const weekdayOfToday = (TODAY - 1 + FIRST_WEEKDAY_OFFSET) % 7;
-  const weekStart = TODAY - weekdayOfToday;
-  const weekCells = Array.from({ length: 7 }, (_, i) => {
-    const d = weekStart + i;
-    return d >= 1 && d <= DAYS_IN_MONTH ? d : null;
-  });
+  // week strip: the Mon→Sun week containing today; out-of-month slots are null
+  const weekCells = getWeekDayNumbers(cal);
   const WEEKDAYS = ["LU", "MA", "ME", "GI", "VE", "SA", "DO"];
 
   return (
@@ -564,7 +566,7 @@ function Diary({ t, view, monthElements, dayElements, resolveAsset, onOpenBook, 
         <Tape t={t} rot={-3} />
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <div>
-            <div className="cp-display" style={{ fontSize: 24, fontWeight: 700, color: t.ink }}>Luglio 2026</div>
+            <div className="cp-display" style={{ fontSize: 24, fontWeight: 700, color: t.ink }}>{cal.monthYearCap}</div>
             <div style={{ fontSize: 12.5, color: t.sub, fontWeight: 700 }}>
               {view === "week" ? "this week" : "your sticker diary"} · tap + to add stickers
             </div>
@@ -600,8 +602,8 @@ function Diary({ t, view, monthElements, dayElements, resolveAsset, onOpenBook, 
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
               {cells.map((d, i) => {
-                const isToday = d === TODAY;
-                const future = d != null && d > TODAY;
+                const isToday = d === cal.todayDay;
+                const future = d != null && isFutureLocalDay(cal.year, cal.monthIndex, d, cal.today);
                 return (
                   <button
                     key={i}
@@ -637,8 +639,8 @@ function Diary({ t, view, monthElements, dayElements, resolveAsset, onOpenBook, 
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
             {weekCells.map((d, i) => {
-              const isToday = d === TODAY;
-              const future = d != null && d > TODAY;
+              const isToday = d === cal.todayDay;
+              const future = d != null && isFutureLocalDay(cal.year, cal.monthIndex, d, cal.today);
               return (
                 <button
                   key={i}
@@ -684,7 +686,7 @@ function Diary({ t, view, monthElements, dayElements, resolveAsset, onOpenBook, 
 
 const PAGE_TURN_MS = 480; // matches .cp-pageturn-* durations (+ small buffer)
 
-function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, onUpdate, editingTextId, onEditText, onAddText, canUndo, onUndo, canRedo, onRedo, onOpenBook, onClose }) {
+function DayPage({ t, cal, day, elements, resolveAsset, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, onUpdate, editingTextId, onEditText, onAddText, canUndo, onUndo, canRedo, onRedo, onOpenBook, onClose }) {
   const [phase, setPhase] = useState("opening"); // opening → open → closing
   const canvasRef = useRef(null);
 
@@ -722,8 +724,8 @@ function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onP
             <X size={17} />
           </button>
           <div style={{ flex: 1 }}>
-            <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink, lineHeight: 1.1 }}>{day} {MONTH_NAME}</div>
-            <div style={{ fontSize: 10.5, color: t.sub, fontWeight: 700 }}>Luglio 2026 · day page</div>
+            <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink, lineHeight: 1.1 }}>{day} {cal.monthName}</div>
+            <div style={{ fontSize: 10.5, color: t.sub, fontWeight: 700 }}>{cal.monthYearCap} · day page</div>
           </div>
           {[
             ["undo", Undo2, canUndo, onUndo],
@@ -806,7 +808,7 @@ function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onP
 /* Minimal shelf: one book cover for the current diary.
    The multiple-diaries PR will expand this. (Sharing/visibility returns with
    the backend layer — no visibility toggle in the local-first app.) */
-function Bookshelf({ t }) {
+function Bookshelf({ t, cal }) {
   return (
     <div style={{ padding: "0 16px 110px" }}>
       <div className="cp-display" style={{ margin: "18px 4px 12px", fontSize: 16, fontWeight: 700, color: t.ink }}>My bookshelf <span style={{ fontSize: 13, color: t.sub }}>책장</span></div>
@@ -827,7 +829,7 @@ function Bookshelf({ t }) {
           <div>
             <span className="cp-sticker" style={{ fontSize: 32 }}>📖</span>
             <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, marginTop: 6 }}>My diary</div>
-            <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 700 }}>Luglio 2026</div>
+            <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 700 }}>{cal.monthYearCap}</div>
           </div>
         </div>
         <div style={{ flex: 1 }}>
@@ -1013,7 +1015,7 @@ function StickerCreatorSheet({ t, onClose, onCreate }) {
 //   v3: { version: 3, diaries: [{id,name}], activeDiaryId,
 //         pages: { [diaryId]: { [pageKey]: { elements: PageElement[] } } },
 //         userAssets, beans, ownedPacks }
-//   pageKey: "2026-07" = monthly spread · "2026-07-15" = day page.
+//   pageKey: "YYYY-MM" = monthly spread · "YYYY-MM-DD" = day page (local month).
 // Ephemeral state (modals/sheets, active tab, toasts) is never persisted.
 const STORAGE_KEY = "momenti.v1";
 
@@ -1028,15 +1030,16 @@ function migrateV1toV2(v1) {
         rotation: p.rot,               // v1 used `rot`
         scale: 1,
         placedAt: p.placedAt ?? Date.now(),
-        page: MONTH_KEY,
+        page: LEGACY_MONTH_KEY,        // legacy data stays on its historical 2026-07 spread
       }))
     : [];
   return { version: 2, entries: v1.entries, beans: v1.beans, ownedPacks: v1.ownedPacks, pageStickers, userAssets: [] };
 }
 
 // v2 → v3: flat monthly StickerInstances become sticker PageElements under
-// the monthly-spread pageKey; diaries[]/activeDiaryId/pages structure lands.
-// Unused legacy fields (entries) are dropped.
+// the legacy monthly-spread pageKey (2026-07 — where they were placed before
+// local dates); diaries[]/activeDiaryId/pages structure lands. Unused legacy
+// fields (entries) are dropped. Migration never rewrites keys to the current month.
 function migrateV2toV3(v2) {
   const elements = Array.isArray(v2.pageStickers)
     ? v2.pageStickers.map((s, i) => createPageElement({
@@ -1053,7 +1056,7 @@ function migrateV2toV3(v2) {
     version: 3,
     diaries: [{ id: DIARY_ID, name: "My diary" }],
     activeDiaryId: DIARY_ID,
-    pages: elements.length ? { [DIARY_ID]: { [MONTH_KEY]: { elements } } } : { [DIARY_ID]: {} },
+    pages: elements.length ? { [DIARY_ID]: { [LEGACY_MONTH_KEY]: { elements } } } : { [DIARY_ID]: {} },
     userAssets: v2.userAssets ?? [],
     beans: v2.beans ?? 12,
     ownedPacks: v2.ownedPacks ?? [],
@@ -1125,7 +1128,7 @@ export default function Momenti() {
     });
   };
   /* the surface the Stickerbook overlay targets: open day page, else monthly spread */
-  const activeSurfaceKey = openDay != null ? dayKeyFor(openDay) : MONTH_KEY;
+  const activeSurfaceKey = openDay != null ? dayKeyFor(openDay) : CAL.monthKey;
 
   /* persist durable state on change (single versioned blob, v3) */
   useEffect(() => {
@@ -1322,22 +1325,22 @@ export default function Momenti() {
         <div style={{ height: "100vh", overflowY: "auto", paddingTop: 50 }} className="cp-scroll">
           {tab === "diario" && (
             <Diary
-              t={t} view={calendarView}
-              monthElements={elementsOf(MONTH_KEY)} resolveAsset={resolveAsset}
+              t={t} cal={CAL} view={calendarView}
+              monthElements={elementsOf(CAL.monthKey)} resolveAsset={resolveAsset}
               dayElements={(d) => elementsOf(dayKeyFor(d))}
               onOpenBook={() => setBookOpen(true)}
               onOpenDay={openDayPage}
-              {...surfaceHandlers(MONTH_KEY)}
+              {...surfaceHandlers(CAL.monthKey)}
             />
           )}
-          {tab === "bookshelf" && <Bookshelf t={t} />}
+          {tab === "bookshelf" && <Bookshelf t={t} cal={CAL} />}
         </div>
 
         {/* full-screen day page (deco surface b) — paper page-turn in/out */}
         {openDay != null && (
           <DayPage
             key={openDay}
-            t={t} day={openDay}
+            t={t} cal={CAL} day={openDay}
             elements={elementsOf(dayKeyFor(openDay))} resolveAsset={resolveAsset}
             onOpenBook={() => setBookOpen(true)}
             onClose={closeDayPage}

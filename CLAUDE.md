@@ -51,6 +51,7 @@ Implemented and merged:
 12. Minimal text boxes + undo/redo on day pages (PR #13): tap-to-edit text with a tiny font/color/size/delete toolbar (D6 minimal spec — no bold/italic/align); hold to lift-drag; per-session snapshot undo/redo (button + Ctrl/Cmd+Z).
 13. Bookshelf visibility toggle removed — the local-first app has no public/private toggle (sharing returns with the backend layer).
 14. Day thumbnails in calendar cells: each month cell and week-strip day previews its day page's top sticker (or a small pen mark for a text-only day), reusing the shared `StickerVisual`. Read-only and **derived live** from the day page each render via `pickDayThumbnail` — no thumbnail field, no separate persistence.
+15. Local-date calendar: month/year, today, days-in-month, and Monday-first offset are derived from the browser's **current local date** (no more hardcoded July 2026 / day 15). Pure helpers in `apps/web/src/calendar/dateUtils.js` (injectable base date); page keys stay `YYYY-MM` / `YYYY-MM-DD`. Legacy `2026-07` data is preserved as-is — migrations never move it to the current month, and there's no month-navigation UI yet.
 
 Still mock / not built: real photo upload + two sticker styles (emoji stand in), 3 속지 presets, multiple diaries, image export, any backend.
 
