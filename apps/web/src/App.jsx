@@ -11,6 +11,7 @@ import { BookOpen, Library, Plus, X } from "lucide-react";
 import { FONTS } from "./design/typography";
 import { STICKER } from "./design/tokens";
 import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSET_LIMIT } from "./data/stickers";
+import { createPageElement } from "./data/pageElements";
 import StickerVisual from "./components/StickerVisual";
 
 /* ---------- theme tokens ---------- */
@@ -65,8 +66,12 @@ const STICKER_ASSETS = seedStickerAssets({
   decoNames: ["Sparkle", "Cuore", "Margherita", "Stella", "Italia"],
 }).map((a) => (GLITTER_BASE_IDS.has(a.id) ? { ...a, texture: "glitter" } : a));
 const ASSET_BY_ID = Object.fromEntries(STICKER_ASSETS.map((a) => [a.id, a]));
-/* single diary page for now (Luglio 2026); instances are keyed to it */
-const DIARY_PAGE_ID = "2026-07";
+/* Single diary until the multiple-diaries PR (§D4) — structure is v3-ready.
+   Surfaces are keyed pages: "2026-07" = monthly spread, "2026-07-15" = a day page. */
+const DIARY_ID = "diary-1";
+const MONTH_KEY = "2026-07";
+const MONTH_NAME = "luglio";
+const dayKeyFor = (d) => `${MONTH_KEY}-${String(d).padStart(2, "0")}`;
 const BOOK_PAGE_SIZE = 8;
 
 /* mock "make a sticker" creator: curated fun emoji + cute default names.
@@ -80,22 +85,7 @@ const PACKS = [
   { id: "ferra", name: "Ferragosto · limitata!", items: ["🌞", "🍑", "🎆"], price: 20, limited: true },
 ];
 
-/* seed calendar: luglio 2026, oggi = 15 (data kept for storage-shape parity;
-   drink entries are no longer rendered after the de-scope) */
-const SEED_ENTRIES = {
-  2:  [{ emoji: "☕", name: "Espresso", cafe: "Bar Nino", time: "8:02", hearts: 5, deco: ["✨"] }],
-  3:  [{ emoji: "🥐", name: "Cornetto", cafe: "Pasticceria Mimosa", time: "9:15", hearts: 4, deco: ["💛"] }],
-  5:  [{ emoji: "🍦", name: "Fior di latte", cafe: "Gelateria Luna Blu", time: "17:40", hearts: 5, deco: ["🌞", "✨"] },
-       { emoji: "☕", name: "Espresso", cafe: "Caffè Aurora", time: "10:20", hearts: 3, deco: [] }],
-  7:  [{ emoji: "🍫", name: "Marocchino", cafe: "Bar Nino", time: "8:30", hearts: 5, deco: ["🍒"] }],
-  9:  [{ emoji: "🍋", name: "Sorbetto limone", cafe: "Gelateria Paganino", time: "19:05", hearts: 4, deco: ["⭐"] }],
-  10: [{ emoji: "☕", name: "Espresso", cafe: "Bar Sport", time: "7:55", hearts: 4, deco: [] }],
-  12: [{ emoji: "🍸", name: "Shakerato", cafe: "Caffè Aurora", time: "15:10", hearts: 5, deco: ["🎀", "✨"] }],
-  13: [{ emoji: "🍨", name: "Pistacchio", cafe: "Gelateria Luna Blu", time: "18:22", hearts: 5, deco: ["🫶"] }],
-  14: [{ emoji: "🥛", name: "Macchiato", cafe: "Torrefazione Gatto Nero", time: "9:40", hearts: 4, deco: ["💌"] }],
-  15: [{ emoji: "☕", name: "Espresso", cafe: "Bar Nino", time: "8:11", hearts: 5, deco: ["✨"] }],
-};
-
+/* calendar frame: luglio 2026, oggi = 15 */
 const TODAY = 15;
 const DAYS_IN_MONTH = 31;
 const FIRST_WEEKDAY_OFFSET = 2; // 1 luglio 2026 = mercoledì (settimana da lunedì)
@@ -165,6 +155,18 @@ const GlobalStyle = ({ t }) => (
     /* peel-back: smooth lift / settle / fly-out for placed stickers */
     .cp-drag-settle { transition: transform .24s cubic-bezier(.34,1.56,.64,1), opacity .2s ease; }
 
+    /* day page: paper page-turn from the left spine (3D rotate + traveling
+       shadow, compositor-only: transform + opacity → holds 60fps) */
+    @keyframes cp-pageturn-in  { from { transform: perspective(1400px) rotateY(-70deg); } to { transform: perspective(1400px) rotateY(0deg); } }
+    @keyframes cp-pageturn-out { from { transform: perspective(1400px) rotateY(0deg); } to { transform: perspective(1400px) rotateY(-70deg); } }
+    .cp-pageturn-in  { transform-origin: left center; animation: cp-pageturn-in .46s cubic-bezier(.22,.9,.3,1) both; will-change: transform; }
+    .cp-pageturn-out { transform-origin: left center; animation: cp-pageturn-out .36s cubic-bezier(.55,.06,.68,.19) both; will-change: transform; }
+    @keyframes cp-pageshade-in  { from { opacity: .38; } to { opacity: 0; } }
+    @keyframes cp-pageshade-out { from { opacity: 0; } to { opacity: .38; } }
+    .cp-pageshade-in  { animation: cp-pageshade-in .46s ease-out both; }
+    .cp-pageshade-out { animation: cp-pageshade-out .36s ease-in both; }
+    @keyframes cp-dayfade { from { opacity: 0; } to { opacity: 1; } }
+
     .cp-scroll { scrollbar-width: none; }
     .cp-scroll::-webkit-scrollbar { display: none; }
 
@@ -176,6 +178,10 @@ const GlobalStyle = ({ t }) => (
       .cp-bob, .cp-pop, .cp-fadeup { animation: none !important; }
       .cp-glitter-sheen { animation: none !important; } /* static sheen */
       .cp-drag-settle { transition: none !important; } /* instant lift/settle */
+      /* page turn simplifies to a fade — function never breaks (§D14) */
+      .cp-pageturn-in  { animation: cp-dayfade .18s ease both !important; }
+      .cp-pageturn-out { animation: cp-dayfade .18s ease both reverse !important; }
+      .cp-pageshade-in, .cp-pageshade-out { animation: none !important; opacity: 0 !important; }
     }
   `}</style>
 );
@@ -222,12 +228,28 @@ function ReturnZone({ t, active, innerRef }) {
 const HOLD_MS = 300;       // press-and-hold to lift
 const MOVE_CANCEL = 8;     // px of movement that cancels a tap / promotes to drag
 
-function Diary({ t, view, onOpenBook, placing, onCancelPlacing, pageStickers, resolveAsset, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
-  const [menuFor, setMenuFor] = useState(null); // placed-sticker id with open action menu
+/* hint chip shown while a peeled sticker waits for a tap on the surface */
+function PlacingHint({ t, placing, onCancel, style }) {
+  return (
+    <div className="cp-pop" style={{ background: t.accentSoft, borderRadius: 14, padding: "9px 12px", display: "flex", alignItems: "center", gap: 9, border: `1.5px dashed ${t.accent}`, ...style }}>
+      <span className="cp-bob" style={{ display: "inline-block" }}><StickerVisual asset={placing} size={22} /></span>
+      <span className="cp-display" style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: t.ink }}>tap the page to stick it ✨</span>
+      <button onClick={onCancel} className="cp-display" style={{ border: "none", background: t.paper, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, color: t.sub, cursor: "pointer" }}>cancel</button>
+    </div>
+  );
+}
+
+/* ═══ ElementLayer — THE shared deco-surface renderer (§D2·D3) ═══
+   Renders one surface's PageElements with the full sticker physics:
+   tilt, thud/settle, press-hold lift, drag, return zone, action menu,
+   and the tap-to-place capture layer. Both deco surfaces (monthly
+   spread + day pages) render through this — never fork it.
+   Mount INSIDE a position:relative surface container; pass its ref. */
+function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, stickerSize = 30, radius = 20 }) {
+  const [menuFor, setMenuFor] = useState(null); // element id with open action menu
   const [drag, setDrag] = useState(null);       // { id, phase: pressing|lifted|returning, sx, sy, cx, cy, over, flyDx, flyDy }
-  const dragRef = useRef(null);                  // mirror of `drag` for synchronous logic (avoids nesting side effects in updaters → StrictMode-safe)
+  const dragRef = useRef(null);                  // mirror of `drag` for synchronous logic (StrictMode-safe)
   const holdTimer = useRef(null);
-  const cardRef = useRef(null);                  // calendar card → maps pointer to x/y %
   const returnRef = useRef(null);                // return zone → hit-test on drop
 
   // update ref + state together; `next` may be a value or (prev)=>value
@@ -285,17 +307,130 @@ function Diary({ t, view, onOpenBook, placing, onCancelPlacing, pageStickers, re
         setTimeout(() => { onReturn(s.id); putDrag(null); }, 200);
         return;
       }
-      const rect = cardRef.current?.getBoundingClientRect();
-      if (rect) {                                // dropped on the page → move to new x/y
+      const rect = surfaceRef.current?.getBoundingClientRect();
+      if (rect) {                                // dropped on the surface → move to new x/y
         const x = ((d.cx - rect.left) / rect.width) * 100;
         const y = ((d.cy - rect.top) / rect.height) * 100;
         if (x >= 0 && x <= 100 && y >= 0 && y <= 100) {
           onMove(s.id, Math.min(95, Math.max(5, x)), Math.min(93, Math.max(7, y)));
         }
       }
-      putDrag(null);                             // outside page & zone → just settle back
+      putDrag(null);                             // outside surface & zone → just settle back
     }
   };
+
+  const sorted = [...elements].sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
+
+  return (
+    <>
+      {/* placed elements — press-hold to lift & drag (sticker type only for now) */}
+      {sorted.map((s) => {
+        if (s.type !== "sticker") return null;   // "text" arrives next PR (§D3)
+        const asset = resolveAsset(s.assetId);
+        if (!asset) return null;                 // unknown/removed asset → skip (stays safe on load)
+        const d = drag && drag.id === s.id ? drag : null;
+        const phase = d ? d.phase : "idle";
+        const lifted = phase === "lifted";
+        const returning = phase === "returning";
+        const floating = lifted || returning;
+        const rot = s.rotation + (lifted ? 3 : 0);
+        const sc = returning ? 0.2 : lifted ? 1.15 : phase === "pressing" ? 0.96 : (s.scale ?? 1);
+        const transform = returning
+          ? `translate(-50%,-50%) translate(${d.flyDx}px, ${d.flyDy}px) rotate(${rot}deg) scale(${sc})`
+          : `translate(-50%,-50%) rotate(${rot}deg) scale(${sc})`;
+        return (
+          <button
+            key={s.id}
+            onPointerDown={(e) => onStickerDown(e, s)}
+            onPointerMove={onStickerMove}
+            onPointerUp={(e) => onStickerUp(e, s)}
+            onPointerCancel={(e) => onStickerUp(e, s)}
+            aria-label={`placed sticker ${asset.name}`}
+            className="cp-drag-settle"
+            style={{
+              position: floating ? "fixed" : "absolute",
+              left: floating ? d.cx : `${s.x}%`,
+              top: floating ? d.cy : `${s.y}%`,
+              transform,
+              opacity: returning ? 0 : 1,
+              zIndex: floating ? 80 : 7,
+              filter: lifted ? "drop-shadow(0 14px 16px rgba(51,33,26,.32))" : "none",
+              lineHeight: 1, padding: 0, border: "none", background: "transparent",
+              cursor: "grab", touchAction: "none",
+            }}
+          >
+            <span className="cp-pop" style={{ display: "inline-block", pointerEvents: "none" }}>
+              <StickerVisual asset={asset} size={stickerSize} />
+            </span>
+          </button>
+        );
+      })}
+
+      {/* action menu for a placed element */}
+      {menuFor != null && (() => {
+        const s = elements.find((p) => p.id === menuFor);
+        if (!s) return null;
+        const asset = resolveAsset(s.assetId);
+        const below = s.y < 55; // open downward if the element sits high on the surface
+        return (
+          <>
+            <div onClick={() => setMenuFor(null)} style={{ position: "absolute", inset: 0, zIndex: 8 }} />
+            <div className="cp-pop" style={{
+              position: "absolute", zIndex: 10, width: 176,
+              left: `${Math.min(70, Math.max(30, s.x))}%`, top: `${s.y}%`,
+              transform: below ? "translate(-50%, 20px)" : "translate(-50%, calc(-100% - 20px))",
+              background: t.paper, borderRadius: 14, padding: 6,
+              border: `1.5px solid ${t.accentSoft}`, boxShadow: "0 6px 18px rgba(51,33,26,.25)",
+            }}>
+              <div className="cp-display" style={{ fontSize: 11, fontWeight: 600, color: t.sub, padding: "3px 8px 5px" }}>{asset ? `${asset.content} ${asset.name}` : ""}</div>
+              {[
+                ["↩", "Return to Stickerbook", onReturn],
+                ["⧉", "Duplicate", onDuplicate],
+                ["✕", "Remove from page", onRemove],
+              ].map(([icon, label, act]) => (
+                <button
+                  key={label}
+                  onClick={() => { act(s.id); setMenuFor(null); }}
+                  className="cp-display"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 7, width: "100%",
+                    border: "none", background: "transparent", borderRadius: 10,
+                    padding: "7px 8px", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                    color: label === "Remove from page" ? t.accent : t.ink, textAlign: "left",
+                  }}
+                >
+                  <span style={{ width: 14, textAlign: "center" }}>{icon}</span> {label}
+                </button>
+              ))}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* placement capture layer: only while a peeled sticker waits */}
+      {placing && (
+        <div
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            const x = ((e.clientX - r.left) / r.width) * 100;
+            const y = ((e.clientY - r.top) / r.height) * 100;
+            onPlaceAt(Math.min(95, Math.max(5, x)), Math.min(93, Math.max(7, y)));
+          }}
+          aria-label="tap to place sticker"
+          style={{ position: "absolute", inset: 0, zIndex: 12, cursor: "copy", borderRadius: radius, border: `2px dashed ${t.accent}`, background: "rgba(255,255,255,.12)" }}
+        />
+      )}
+
+      {/* peel-back drop target, only while an element is lifted */}
+      {drag && (drag.phase === "lifted" || drag.phase === "returning") && (
+        <ReturnZone t={t} active={!!drag.over} innerRef={returnRef} />
+      )}
+    </>
+  );
+}
+
+function Diary({ t, view, monthElements, resolveAsset, onOpenBook, onOpenDay, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
+  const cardRef = useRef(null); // calendar card = the monthly-spread surface
 
   const cells = [];
   for (let i = 0; i < FIRST_WEEKDAY_OFFSET; i++) cells.push(null);
@@ -333,20 +468,14 @@ function Diary({ t, view, onOpenBook, placing, onCancelPlacing, pageStickers, re
         <span style={{ flex: 1, minWidth: 0 }}>
           <span className="cp-display" style={{ display: "block", fontWeight: 600, fontSize: 14, color: t.ink }}>Stickerbook</span>
           <span style={{ display: "block", fontSize: 11, color: t.sub, fontWeight: 700 }}>
-            {pageStickers.length > 0 ? `${pageStickers.length} stuck on this page · ` : ""}peel a sticker, decorate the page
+            {monthElements.length > 0 ? `${monthElements.length} stuck on this page · ` : ""}peel a sticker, decorate the page
           </span>
         </span>
         <span className="cp-display" style={{ fontSize: 11.5, fontWeight: 700, color: t.accent, background: t.accentSoft, borderRadius: 999, padding: "5px 11px", flexShrink: 0 }}>Open</span>
       </button>
 
       {/* placing hint */}
-      {placing && (
-        <div className="cp-pop" style={{ marginTop: 10, background: t.accentSoft, borderRadius: 14, padding: "9px 12px", display: "flex", alignItems: "center", gap: 9, border: `1.5px dashed ${t.accent}` }}>
-          <span className="cp-bob" style={{ display: "inline-block" }}><StickerVisual asset={placing} size={22} /></span>
-          <span className="cp-display" style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: t.ink }}>tap the calendar page to stick it ✨</span>
-          <button onClick={onCancelPlacing} className="cp-display" style={{ border: "none", background: t.paper, borderRadius: 999, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, color: t.sub, cursor: "pointer" }}>cancel</button>
-        </div>
-      )}
+      {placing && <PlacingHint t={t} placing={placing} onCancel={onCancelPlacing} style={{ marginTop: 10 }} />}
 
       {/* calendar */}
       <div ref={cardRef} style={{ position: "relative", marginTop: 14, background: t.paper, borderRadius: 20, padding: "14px 10px 16px", boxShadow: "0 3px 12px rgba(51,33,26,.09)", backgroundImage: `radial-gradient(${t.accentSoft} 1px, transparent 1px)`, backgroundSize: "14px 14px" }}>
@@ -362,17 +491,24 @@ function Diary({ t, view, onOpenBook, placing, onCancelPlacing, pageStickers, re
                 const isToday = d === TODAY;
                 const future = d != null && d > TODAY;
                 return (
-                  <div key={i} style={{
-                    aspectRatio: "1", borderRadius: 12, position: "relative", padding: 0,
-                    ...(isToday ? { background: t.accentSoft, boxShadow: `inset 0 0 0 2px ${t.accent}` } : {}),
-                  }}>
+                  <button
+                    key={i}
+                    onClick={() => d && !future && onOpenDay(d)}
+                    disabled={!d || future}
+                    aria-label={d ? `open day ${d}` : undefined}
+                    style={{
+                      aspectRatio: "1", borderRadius: 12, position: "relative", padding: 0,
+                      border: "none", background: "transparent", cursor: d && !future ? "pointer" : "default",
+                      ...(isToday ? { background: t.accentSoft, boxShadow: `inset 0 0 0 2px ${t.accent}` } : {}),
+                    }}
+                  >
                     {d && (
                       <span style={{
                         position: "absolute", top: 3, left: 5, fontSize: 9.5, fontWeight: 800,
                         color: future ? "rgba(0,0,0,.18)" : isToday ? t.accent : t.sub,
                       }}>{d}</span>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -383,123 +519,132 @@ function Diary({ t, view, onOpenBook, placing, onCancelPlacing, pageStickers, re
               const isToday = d === TODAY;
               const future = d != null && d > TODAY;
               return (
-                <div key={i} style={{
-                  minHeight: 66, borderRadius: 12, position: "relative",
-                  display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 7,
-                  background: isToday ? t.accentSoft : "transparent",
-                  boxShadow: isToday ? `inset 0 0 0 2px ${t.accent}` : "none",
-                }}>
+                <button
+                  key={i}
+                  onClick={() => d && !future && onOpenDay(d)}
+                  disabled={!d || future}
+                  aria-label={d ? `open day ${d}` : undefined}
+                  style={{
+                    minHeight: 66, borderRadius: 12, position: "relative",
+                    display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 7,
+                    border: "none", cursor: d && !future ? "pointer" : "default",
+                    background: isToday ? t.accentSoft : "transparent",
+                    boxShadow: isToday ? `inset 0 0 0 2px ${t.accent}` : "none",
+                  }}
+                >
                   <span className="cp-display" style={{ fontSize: 10, fontWeight: 600, color: i >= 5 ? t.accent : t.sub }}>{WEEKDAYS[i]}</span>
                   {d && <span style={{ fontSize: 16, fontWeight: 800, marginTop: 5, color: future ? "rgba(0,0,0,.18)" : isToday ? t.accent : t.ink }}>{d}</span>}
-                </div>
+                </button>
               );
             })}
           </div>
         )}
 
-        {/* placed stickers (instances stuck on this page) — press-hold to lift & drag */}
-        {pageStickers.map((s) => {
-          const asset = resolveAsset(s.assetId);
-          if (!asset) return null; // unknown/removed asset → skip (stays safe on load)
-          const d = drag && drag.id === s.id ? drag : null;
-          const phase = d ? d.phase : "idle";
-          const lifted = phase === "lifted";
-          const returning = phase === "returning";
-          const floating = lifted || returning;
-          // scale/rotation per phase
-          const rot = s.rotation + (lifted ? 3 : 0);
-          const sc = returning ? 0.2 : lifted ? 1.15 : phase === "pressing" ? 0.96 : (s.scale ?? 1);
-          const transform = returning
-            ? `translate(-50%,-50%) translate(${d.flyDx}px, ${d.flyDy}px) rotate(${rot}deg) scale(${sc})`
-            : `translate(-50%,-50%) rotate(${rot}deg) scale(${sc})`;
-          return (
-            <button
-              key={s.id}
-              onPointerDown={(e) => onStickerDown(e, s)}
-              onPointerMove={onStickerMove}
-              onPointerUp={(e) => onStickerUp(e, s)}
-              onPointerCancel={(e) => onStickerUp(e, s)}
-              aria-label={`placed sticker ${asset.name}`}
-              className="cp-drag-settle"
-              style={{
-                position: floating ? "fixed" : "absolute",
-                left: floating ? d.cx : `${s.x}%`,
-                top: floating ? d.cy : `${s.y}%`,
-                transform,
-                opacity: returning ? 0 : 1,
-                zIndex: floating ? 80 : 7,
-                filter: lifted ? "drop-shadow(0 14px 16px rgba(51,33,26,.32))" : "none",
-                lineHeight: 1, padding: 0, border: "none", background: "transparent",
-                cursor: "grab", touchAction: "none",
-              }}
-            >
-              <span className="cp-pop" style={{ display: "inline-block", pointerEvents: "none" }}>
-                <StickerVisual asset={asset} size={30} />
-              </span>
-            </button>
-          );
-        })}
+        {/* monthly spread = deco surface (a) — same shared layer as day pages */}
+        <ElementLayer
+          t={t} surfaceRef={cardRef} elements={monthElements} resolveAsset={resolveAsset}
+          placing={placing} onPlaceAt={onPlaceAt} onMove={onMove}
+          onReturn={onReturn} onDuplicate={onDuplicate} onRemove={onRemove}
+        />
+      </div>
+    </div>
+  );
+}
 
-        {/* action menu for a placed sticker */}
-        {menuFor != null && (() => {
-          const s = pageStickers.find((p) => p.id === menuFor);
-          if (!s) return null;
-          const asset = resolveAsset(s.assetId);
-          const below = s.y < 55; // open downward if the sticker sits high on the page
-          return (
-            <>
-              <div onClick={() => setMenuFor(null)} style={{ position: "absolute", inset: 0, zIndex: 8 }} />
-              <div className="cp-pop" style={{
-                position: "absolute", zIndex: 10, width: 176,
-                left: `${Math.min(70, Math.max(30, s.x))}%`, top: `${s.y}%`,
-                transform: below ? "translate(-50%, 20px)" : "translate(-50%, calc(-100% - 20px))",
-                background: t.paper, borderRadius: 14, padding: 6,
-                border: `1.5px solid ${t.accentSoft}`, boxShadow: "0 6px 18px rgba(51,33,26,.25)",
-              }}>
-                <div className="cp-display" style={{ fontSize: 11, fontWeight: 600, color: t.sub, padding: "3px 8px 5px" }}>{asset ? `${asset.content} ${asset.name}` : ""}</div>
-                {[
-                  ["↩", "Return to Stickerbook", onReturn],
-                  ["⧉", "Duplicate", onDuplicate],
-                  ["✕", "Remove from page", onRemove],
-                ].map(([icon, label, act]) => (
-                  <button
-                    key={label}
-                    onClick={() => { act(s.id); setMenuFor(null); }}
-                    className="cp-display"
-                    style={{
-                      display: "flex", alignItems: "center", gap: 7, width: "100%",
-                      border: "none", background: "transparent", borderRadius: 10,
-                      padding: "7px 8px", cursor: "pointer", fontSize: 12, fontWeight: 600,
-                      color: label === "Remove from page" ? t.accent : t.ink, textAlign: "left",
-                    }}
-                  >
-                    <span style={{ width: 14, textAlign: "center" }}>{icon}</span> {label}
-                  </button>
-                ))}
-              </div>
-            </>
-          );
-        })()}
+/* ═══════════════ 2 · DAY PAGE (풀스크린 · 3:4, §D1) ═══════════════ */
 
-        {/* placement capture layer: only while a peeled sticker waits */}
-        {placing && (
+const PAGE_TURN_MS = 480; // matches .cp-pageturn-* durations (+ small buffer)
+
+function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove, onOpenBook, onClose }) {
+  const [phase, setPhase] = useState("opening"); // opening → open → closing
+  const canvasRef = useRef(null);
+
+  // after the page-turn finishes, drop the animation class so no ancestor
+  // transform lingers (position:fixed children — lifted stickers, return
+  // zone — must anchor to the viewport, not the turned page)
+  const handleTurnEnd = (e) => { if (e.target === e.currentTarget && phase === "opening") setPhase("open"); };
+  // belt-and-braces: hidden tabs / forced-off animations never fire
+  // animationend, so a timer also advances the phase (§D14: motion may
+  // simplify or skip, function never breaks)
+  useEffect(() => {
+    if (phase !== "opening") return;
+    const id = setTimeout(() => setPhase((p) => (p === "opening" ? "open" : p)), PAGE_TURN_MS + 60);
+    return () => clearTimeout(id);
+  }, [phase]);
+
+  const requestClose = () => {
+    if (phase === "closing") return;
+    if (placing) onCancelPlacing();  // leaving the page cancels a pending placement
+    setPhase("closing");
+    setTimeout(onClose, PAGE_TURN_MS - 100);
+  };
+
+  const turnClass = phase === "opening" ? "cp-pageturn-in" : phase === "closing" ? "cp-pageturn-out" : "";
+  const shadeClass = phase === "opening" ? "cp-pageshade-in" : phase === "closing" ? "cp-pageshade-out" : "";
+
+  return (
+    <div style={{ position: "absolute", inset: 0, zIndex: 38, background: "rgba(51,33,26,.25)" }}>
+      {/* the turning page (3D rotate from the left spine + traveling shadow) */}
+      <div className={turnClass} onAnimationEnd={handleTurnEnd} style={{ position: "absolute", inset: 0, background: t.bg, display: "flex", flexDirection: "column" }}>
+
+        {/* date header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px 8px" }}>
+          <button onClick={requestClose} aria-label="close day page" style={{ border: "none", background: t.paper, borderRadius: 12, width: 34, height: 34, cursor: "pointer", color: t.ink, boxShadow: "0 2px 6px rgba(51,33,26,.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={17} />
+          </button>
+          <div>
+            <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink, lineHeight: 1.1 }}>{day} {MONTH_NAME}</div>
+            <div style={{ fontSize: 10.5, color: t.sub, fontWeight: 700 }}>Luglio 2026 · day page</div>
+          </div>
+        </div>
+
+        {/* 3:4 canvas, centered/letterboxed (§D1) */}
+        <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: "4px 18px" }}>
           <div
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              const x = ((e.clientX - r.left) / r.width) * 100;
-              const y = ((e.clientY - r.top) / r.height) * 100;
-              onPlaceAt(Math.min(95, Math.max(5, x)), Math.min(93, Math.max(7, y)));
+            ref={canvasRef}
+            style={{
+              aspectRatio: "3 / 4",
+              width: "min(100%, calc((100vh - 170px) * 0.75))",
+              position: "relative",
+              background: t.paper, borderRadius: 18,
+              backgroundImage: `radial-gradient(${t.accentSoft} 1px, transparent 1px)`,
+              backgroundSize: "14px 14px",
+              boxShadow: "0 10px 30px rgba(51,33,26,.18), 0 2px 8px rgba(51,33,26,.1)",
             }}
-            aria-label="tap to place sticker"
-            style={{ position: "absolute", inset: 0, zIndex: 12, cursor: "copy", borderRadius: 20, border: `2px dashed ${t.accent}`, background: "rgba(255,255,255,.12)" }}
-          />
+          >
+            {elements.length === 0 && !placing && (
+              <div className="cp-display" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: t.sub, fontWeight: 600, fontSize: 13, pointerEvents: "none" }}>
+                <span style={{ fontSize: 30 }}>🫧</span>
+                an empty page… stick something cute
+              </div>
+            )}
+            {/* day page = deco surface (b) — same shared layer as the monthly spread */}
+            <ElementLayer
+              t={t} surfaceRef={canvasRef} elements={elements} resolveAsset={resolveAsset}
+              placing={placing} onPlaceAt={onPlaceAt} onMove={onMove}
+              onReturn={onReturn} onDuplicate={onDuplicate} onRemove={onRemove}
+              stickerSize={40} radius={18}
+            />
+          </div>
+        </div>
+
+        {/* footer: stickerbook affordance targeting THIS page */}
+        <div style={{ padding: "8px 18px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {placing && <PlacingHint t={t} placing={placing} onCancel={onCancelPlacing} />}
+          <button onClick={onOpenBook} className="cp-display" style={{
+            border: "none", borderRadius: 999, padding: "12px 0", width: "100%",
+            background: t.accent, color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer",
+            boxShadow: "0 5px 14px rgba(200,51,27,.3)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}>
+            📒 Add stickers to this page
+          </button>
+        </div>
+
+        {/* traveling shadow while the page turns */}
+        {shadeClass && (
+          <div aria-hidden className={shadeClass} style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "linear-gradient(105deg, rgba(51,33,26,.5), rgba(51,33,26,0) 55%)" }} />
         )}
       </div>
-
-      {/* peel-back drop target, only while a sticker is lifted */}
-      {drag && (drag.phase === "lifted" || drag.phase === "returning") && (
-        <ReturnZone t={t} active={!!drag.over} innerRef={returnRef} />
-      )}
     </div>
   );
 }
@@ -722,14 +867,17 @@ function StickerCreatorSheet({ t, onClose, onCreate }) {
   );
 }
 
-/* ═══════════════ localStorage persistence ═══════════════ */
-// One versioned JSON blob under a single key. Only durable data is saved
-// (diary entries, placed stickers, owned packs, beans). Ephemeral state —
-// live map balloons, modals/sheets, active tab, toasts — is never persisted.
+/* ═══════════════ localStorage persistence (v3, §D4) ═══════════════ */
+// One versioned JSON blob under a single key.
+//   v3: { version: 3, diaries: [{id,name}], activeDiaryId,
+//         pages: { [diaryId]: { [pageKey]: { elements: PageElement[] } } },
+//         userAssets, beans, ownedPacks }
+//   pageKey: "2026-07" = monthly spread · "2026-07-15" = day page.
+// Ephemeral state (modals/sheets, active tab, toasts) is never persisted.
 const STORAGE_KEY = "momenti.v1";
 
-// Migrate a v1 blob (placements as { id, assetId, emoji, name, x, y, rot })
-// to v2 (placements as StickerInstance referencing assets by id).
+// v1 → v2: legacy placements ({ id, assetId, emoji, name, x, y, rot })
+// become StickerInstances referencing assets by id.
 function migrateV1toV2(v1) {
   const pageStickers = Array.isArray(v1.pageStickers)
     ? v1.pageStickers.map((p) => createStickerInstance({
@@ -739,10 +887,36 @@ function migrateV1toV2(v1) {
         rotation: p.rot,               // v1 used `rot`
         scale: 1,
         placedAt: p.placedAt ?? Date.now(),
-        page: DIARY_PAGE_ID,
+        page: MONTH_KEY,
       }))
     : [];
   return { version: 2, entries: v1.entries, beans: v1.beans, ownedPacks: v1.ownedPacks, pageStickers, userAssets: [] };
+}
+
+// v2 → v3: flat monthly StickerInstances become sticker PageElements under
+// the monthly-spread pageKey; diaries[]/activeDiaryId/pages structure lands.
+// Unused legacy fields (entries) are dropped.
+function migrateV2toV3(v2) {
+  const elements = Array.isArray(v2.pageStickers)
+    ? v2.pageStickers.map((s, i) => createPageElement({
+        id: `el-${s.id}`,
+        type: "sticker",
+        assetId: s.assetId,
+        x: s.x, y: s.y,
+        rotation: s.rotation ?? 0,
+        scale: s.scale ?? 1,
+        z: i,                          // z = array order
+      }))
+    : [];
+  return {
+    version: 3,
+    diaries: [{ id: DIARY_ID, name: "My diary" }],
+    activeDiaryId: DIARY_ID,
+    pages: elements.length ? { [DIARY_ID]: { [MONTH_KEY]: { elements } } } : { [DIARY_ID]: {} },
+    userAssets: v2.userAssets ?? [],
+    beans: v2.beans ?? 12,
+    ownedPacks: v2.ownedPacks ?? [],
+  };
 }
 
 function loadPersisted() {
@@ -751,9 +925,10 @@ function loadPersisted() {
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data) return null;
-    if (data.version === 2) return data;
-    if (data.version === 1) return migrateV1toV2(data); // upgrade old placements
-    return null;                                         // unknown version → seed defaults
+    if (data.version === 3) return data;
+    if (data.version === 2) return migrateV2toV3(data);               // one hop
+    if (data.version === 1) return migrateV2toV3(migrateV1toV2(data)); // chained v1→v2→v3
+    return null;                                                       // unknown version → seed defaults
   } catch {
     return null; // missing / corrupt / storage unavailable → seed defaults
   }
@@ -765,82 +940,108 @@ export default function Momenti() {
   const [saved] = useState(loadPersisted); // parsed once on mount; null if absent/corrupt
   const [tab, setTab] = useState("diario");
   const [calendarView, setCalendarView] = useState("month"); // month | week
+  const [openDay, setOpenDay] = useState(null); // day number with the full-screen day page open
   const [toast, setToast] = useState(null);
-  const [isPublic, setIsPublic] = useState(false); // session-only diary visibility (not persisted)
-  // Beans / packs / drink-entries stay in state + persistence (UI removed / dormant)
-  // so the stored blob shape is unchanged. No setters — nothing mutates them now.
-  const [entries] = useState(saved?.entries ?? SEED_ENTRIES);
+  const [isPublic, setIsPublic] = useState(false); // session-only diary visibility (Bookshelf placeholder)
+  // Beans / packs stay in state + persistence (UI dormant); no setters — nothing mutates them.
   const [beans] = useState(saved?.beans ?? 12);
   const [ownedPacks] = useState(saved?.ownedPacks ?? []);
 
-  /* stickerbook overlay — local prototype state only.
-     assets live in STICKER_ASSETS; these are placed *instances*. */
+  /* v3 structure (§D4): diaries[] + pages keyed by (diaryId, pageKey).
+     UI stays single-diary until the multiple-diaries PR — always activeDiaryId. */
+  const [diaries] = useState(saved?.diaries ?? [{ id: DIARY_ID, name: "My diary" }]);
+  const [activeDiaryId] = useState(saved?.activeDiaryId ?? DIARY_ID);
+  const [pages, setPages] = useState(saved?.pages ?? { [DIARY_ID]: {} });
+
+  /* stickerbook overlay — assets live in STICKER_ASSETS + userAssets */
   const [bookOpen, setBookOpen] = useState(false);
   const [bookPage, setBookPage] = useState(0);
-  const [placingSticker, setPlacingSticker] = useState(null); // peeled asset waiting for a tap on the page
-  const [pageStickers, setPageStickers] = useState(saved?.pageStickers ?? []); // instances stuck on today's diary page
-  // resume ids past the highest restored one so new placements never collide
-  const placedIdRef = useRef((saved?.pageStickers?.reduce((m, s) => Math.max(m, s.id), 0) ?? 0) + 1);
+  const [placingSticker, setPlacingSticker] = useState(null); // peeled asset waiting for a tap on the active surface
   const [userAssets, setUserAssets] = useState(saved?.userAssets ?? []); // user-made StickerAssets (source:"user")
 
   const t = THEME;
 
-  /* resolve a placed instance's design — base seed assets + user-made ones */
+  /* resolve a placed element's design — base seed assets + user-made ones */
   const resolveAsset = (id) => ASSET_BY_ID[id] ?? userAssets.find((a) => a.id === id);
 
-  /* persist durable state on change (single versioned blob) */
+  /* ── surface helpers: every deco surface is a pageKey under the active diary ── */
+  const elementsOf = (pageKey) => pages[activeDiaryId]?.[pageKey]?.elements ?? [];
+  const setElements = (pageKey, updater) => {
+    setPages((prev) => {
+      const diary = prev[activeDiaryId] ?? {};
+      const cur = diary[pageKey]?.elements ?? [];
+      const next = typeof updater === "function" ? updater(cur) : updater;
+      return { ...prev, [activeDiaryId]: { ...diary, [pageKey]: { elements: next } } };
+    });
+  };
+  /* the surface the Stickerbook overlay targets: open day page, else monthly spread */
+  const activeSurfaceKey = openDay != null ? dayKeyFor(openDay) : MONTH_KEY;
+
+  /* persist durable state on change (single versioned blob, v3) */
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, entries, beans, ownedPacks, pageStickers, userAssets }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, diaries, activeDiaryId, pages, userAssets, beans, ownedPacks }));
     } catch {
       // ignore write failures (quota exceeded / private mode)
     }
-  }, [entries, beans, ownedPacks, pageStickers, userAssets]);
+  }, [diaries, activeDiaryId, pages, userAssets, beans, ownedPacks]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2400); };
 
-  /* ── stickerbook actions ── */
+  /* ── stickerbook actions (surface-keyed) ── */
   const pickFromBook = (asset) => {
     setBookOpen(false);
     setPlacingSticker(asset);
     showToast(`${asset.content} peeled! tap the page to stick it`);
   };
-  const placeSticker = (x, y) => {
+  const placeElement = (pageKey, x, y) => {
     if (!placingSticker) return;
-    setPageStickers((ps) => [...ps, createStickerInstance({
-      id: placedIdRef.current++, assetId: placingSticker.id,
-      x, y, rotation: randomTilt(), scale: 1, placedAt: Date.now(), page: DIARY_PAGE_ID,
+    setElements(pageKey, (els) => [...els, createPageElement({
+      type: "sticker", assetId: placingSticker.id,
+      x, y, rotation: randomTilt(), scale: 1,
+      z: els.reduce((m, e) => Math.max(m, e.z ?? 0), 0) + 1,
     })]);
     showToast(`${placingSticker.content} stuck! ✨`);
     setPlacingSticker(null);
   };
-  /* removes only the placed instance — the asset stays in the Stickerbook */
-  const returnPlaced = (id) => {
-    const s = pageStickers.find((p) => p.id === id);
+  /* removes only the placed element — the asset stays in the Stickerbook */
+  const returnElement = (pageKey, id) => {
+    const s = elementsOf(pageKey).find((p) => p.id === id);
     const asset = s && resolveAsset(s.assetId);
-    setPageStickers((ps) => ps.filter((p) => p.id !== id));
+    setElements(pageKey, (els) => els.filter((p) => p.id !== id));
     showToast(`${asset ? asset.content + " " : ""}back in the Stickerbook ↩`);
   };
-  const duplicatePlaced = (id) => {
-    setPageStickers((ps) => {
-      const s = ps.find((p) => p.id === id);
-      if (!s) return ps;
-      return [...ps, createStickerInstance({
-        ...s, id: placedIdRef.current++,
+  const duplicateElement = (pageKey, id) => {
+    setElements(pageKey, (els) => {
+      const s = els.find((p) => p.id === id);
+      if (!s) return els;
+      return [...els, createPageElement({
+        ...s, id: undefined,
         x: Math.min(93, s.x + 7), y: Math.min(91, s.y + 7),
-        rotation: randomTilt(), placedAt: Date.now(),
+        rotation: randomTilt(),
+        z: els.reduce((m, e) => Math.max(m, e.z ?? 0), 0) + 1,
       })];
     });
     showToast("⧉ stuck a copy!");
   };
-  const removePlaced = (id) => {
-    setPageStickers((ps) => ps.filter((p) => p.id !== id));
+  const removeElement = (pageKey, id) => {
+    setElements(pageKey, (els) => els.filter((p) => p.id !== id));
     showToast("peeled off the page");
   };
-  /* peel-back drag: update a placed instance's position (percent coords) */
-  const moveSticker = (id, x, y) => {
-    setPageStickers((ps) => ps.map((p) => (p.id === id ? { ...p, x, y } : p)));
+  /* peel-back drag: update a placed element's position (percent coords) */
+  const moveElement = (pageKey, id, x, y) => {
+    setElements(pageKey, (els) => els.map((p) => (p.id === id ? { ...p, x, y } : p)));
   };
+  /* bind the shared handlers to one surface for an ElementLayer */
+  const surfaceHandlers = (pageKey) => ({
+    placing: placingSticker,
+    onCancelPlacing: () => setPlacingSticker(null),
+    onPlaceAt: (x, y) => placeElement(pageKey, x, y),
+    onMove: (id, x, y) => moveElement(pageKey, id, x, y),
+    onReturn: (id) => returnElement(pageKey, id),
+    onDuplicate: (id) => duplicateElement(pageKey, id),
+    onRemove: (id) => removeElement(pageKey, id),
+  });
   /* create a mock user sticker asset (emoji only) — enforces the free limit */
   const createUserSticker = ({ content, texture, name }) => {
     if (userAssets.length >= FREE_ASSET_LIMIT) {
@@ -896,15 +1097,26 @@ export default function Momenti() {
           {tab === "diario" && (
             <Diary
               t={t} view={calendarView}
+              monthElements={elementsOf(MONTH_KEY)} resolveAsset={resolveAsset}
               onOpenBook={() => setBookOpen(true)}
-              placing={placingSticker} onCancelPlacing={() => setPlacingSticker(null)}
-              pageStickers={pageStickers} resolveAsset={resolveAsset} onPlaceAt={placeSticker}
-              onMove={moveSticker}
-              onReturn={returnPlaced} onDuplicate={duplicatePlaced} onRemove={removePlaced}
+              onOpenDay={(d) => setOpenDay(d)}
+              {...surfaceHandlers(MONTH_KEY)}
             />
           )}
           {tab === "bookshelf" && <Bookshelf t={t} isPublic={isPublic} setIsPublic={setIsPublic} />}
         </div>
+
+        {/* full-screen day page (deco surface b) — paper page-turn in/out */}
+        {openDay != null && (
+          <DayPage
+            key={openDay}
+            t={t} day={openDay}
+            elements={elementsOf(dayKeyFor(openDay))} resolveAsset={resolveAsset}
+            onOpenBook={() => setBookOpen(true)}
+            onClose={() => setOpenDay(null)}
+            {...surfaceHandlers(dayKeyFor(openDay))}
+          />
+        )}
 
         {/* toast */}
         {toast && (
