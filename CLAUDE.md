@@ -50,15 +50,16 @@ Implemented and merged:
 11. Full-screen day pages (PR #12): tap a day → 3:4 portrait page with a paper page-turn open/close; the unified **`PageElement`** model (`sticker` / `text`); one shared element layer drives stickers on both the monthly spread and day pages; storage schema **v3** (`diaries[]` + pages keyed by `(diaryId, date)`) with v2→v3 migration.
 12. Minimal text boxes + undo/redo on day pages (PR #13): tap-to-edit text with a tiny font/color/size/delete toolbar (D6 minimal spec — no bold/italic/align); hold to lift-drag; per-session snapshot undo/redo (button + Ctrl/Cmd+Z).
 13. Bookshelf visibility toggle removed — the local-first app has no public/private toggle (sharing returns with the backend layer).
+14. Day thumbnails in calendar cells: each month cell and week-strip day previews its day page's top sticker (or a small pen mark for a text-only day), reusing the shared `StickerVisual`. Read-only and **derived live** from the day page each render via `pickDayThumbnail` — no thumbnail field, no separate persistence.
 
-Still mock / not built: real photo upload + two sticker styles (emoji stand in), day thumbnails, 3 속지 presets, multiple diaries, image export, any backend.
+Still mock / not built: real photo upload + two sticker styles (emoji stand in), 3 속지 presets, multiple diaries, image export, any backend.
 
 ## Next (local-first, no backend)
 
 1. De-scope (done, PR #10).
 2. Full-screen day deco mode MVP (done, PR #12/#13) — 3:4 page, stickers + minimal text boxes, unified `PageElement` model, undo/redo, storage v3.
-3. **Day thumbnails in calendar cells** ← next.
-4. Photo upload + **two sticker styles** (polaroid + die-cut cutout), IndexedDB, 1080px — the heart of the product. Replaces the emoji creator; the 100-limit is revisited as a storage-based cap.
+3. Day thumbnails in calendar cells (done) — top sticker / text-only mark, derived live, no new persistence.
+4. **Photo upload + two sticker styles** (polaroid + die-cut cutout), IndexedDB, 1080px ← next. The heart of the product. Replaces the emoji creator; the 100-limit is revisited as a storage-based cap.
 5. **3 fixed 속지 presets** (daily / travel / moodboard, no engine) + fonts + **Moka default sticker pack** assets.
 6. Image export + **Moka corner mark** (1080×1440, optional 9:16) = **🚩 V1 LAUNCH LINE**.
 7. Multiple diaries + Bookshelf expansion (acceptable as **v1.1**).
