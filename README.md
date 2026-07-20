@@ -14,6 +14,7 @@ The web app is at [`apps/web`](apps/web) — a Vite + React (JSX-first) prototyp
 
 - **Monthly / weekly diary** — a decoratable monthly spread + a week strip for navigation
 - **Full-screen day pages** — tap a day → a 3:4 portrait page that opens with a paper page-turn
+- **Day thumbnails** — each calendar cell (month + week strip) previews its day's top sticker, or a small mark for a text-only day — derived live from the page, never stored
 - **Stickers** — place emoji stickers on a page, then move / duplicate / peel them back with hold-lift-drag physics and a return zone
 - **Text elements** — minimal text boxes on day pages (a few fonts, an ink palette, three sizes)
 - **Undo / redo** — per day-page session (button + Ctrl/Cmd+Z)
@@ -46,4 +47,4 @@ See [`apps/web/README.md`](apps/web/README.md) for web-app dev details.
 
 ## What's next
 
-The next roadmap item is **day thumbnails** (a representative photo/sticker shown in each calendar cell). After that: photo upload + two sticker styles (polaroid + die-cut cutout), 3 속지 presets, and image export. See [`docs/product.md`](docs/product.md) for the full roadmap.
+The next roadmap item is **photo upload + two sticker styles** (polaroid + die-cut cutout, stored in IndexedDB, resized to 1080px) — the heart of the product, which replaces the emoji stand-in. After that: 3 속지 presets and image export. See [`docs/product.md`](docs/product.md) for the full roadmap.

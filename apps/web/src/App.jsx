@@ -14,6 +14,7 @@ import { STICKER, COLORS } from "./design/tokens";
 import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSET_LIMIT } from "./data/stickers";
 import { createPageElement } from "./data/pageElements";
 import StickerVisual from "./components/StickerVisual";
+import DayThumbnail from "./components/DayThumbnail";
 
 /* ---------- theme tokens ---------- */
 /* single warm palette (the old caffe theme); gelato branch removed in the
@@ -540,7 +541,7 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
   );
 }
 
-function Diary({ t, view, monthElements, resolveAsset, onOpenBook, onOpenDay, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
+function Diary({ t, view, monthElements, dayElements, resolveAsset, onOpenBook, onOpenDay, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
   const cardRef = useRef(null); // calendar card = the monthly-spread surface
 
   const cells = [];
@@ -619,6 +620,15 @@ function Diary({ t, view, monthElements, resolveAsset, onOpenBook, onOpenDay, pl
                         color: future ? "rgba(0,0,0,.18)" : isToday ? t.accent : t.sub,
                       }}>{d}</span>
                     )}
+                    {/* read-only day preview: sits in the lower cell, clear of the
+                        date number; pointer-events:none keeps the button clickable */}
+                    {d && (
+                      <DayThumbnail
+                        elements={dayElements(d)} resolveAsset={resolveAsset}
+                        size={18} subColor={t.sub}
+                        style={{ position: "absolute", left: 0, right: 0, top: "38%", bottom: 2, overflow: "hidden" }}
+                      />
+                    )}
                   </button>
                 );
               })}
@@ -645,6 +655,14 @@ function Diary({ t, view, monthElements, resolveAsset, onOpenBook, onOpenDay, pl
                 >
                   <span className="cp-display" style={{ fontSize: 10, fontWeight: 600, color: i >= 5 ? t.accent : t.sub }}>{WEEKDAYS[i]}</span>
                   {d && <span style={{ fontSize: 16, fontWeight: 800, marginTop: 5, color: future ? "rgba(0,0,0,.18)" : isToday ? t.accent : t.ink }}>{d}</span>}
+                  {/* same shared selection rule as the month cells; strip stays nav-only */}
+                  {d && (
+                    <DayThumbnail
+                      elements={dayElements(d)} resolveAsset={resolveAsset}
+                      size={22} subColor={t.sub}
+                      style={{ marginTop: 4, height: 26 }}
+                    />
+                  )}
                 </button>
               );
             })}
@@ -1306,6 +1324,7 @@ export default function Momenti() {
             <Diary
               t={t} view={calendarView}
               monthElements={elementsOf(MONTH_KEY)} resolveAsset={resolveAsset}
+              dayElements={(d) => elementsOf(dayKeyFor(d))}
               onOpenBook={() => setBookOpen(true)}
               onOpenDay={openDayPage}
               {...surfaceHandlers(MONTH_KEY)}
