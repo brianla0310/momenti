@@ -785,9 +785,10 @@ function DayPage({ t, day, elements, resolveAsset, placing, onCancelPlacing, onP
 
 /* ═══════════════ 3 · BOOKSHELF (책장) ═══════════════ */
 
-/* Minimal shelf: one book cover for the current diary + the relocated
-   public/private toggle. The multiple-diaries PR will expand this. */
-function Bookshelf({ t, isPublic, setIsPublic }) {
+/* Minimal shelf: one book cover for the current diary.
+   The multiple-diaries PR will expand this. (Sharing/visibility returns with
+   the backend layer — no visibility toggle in the local-first app.) */
+function Bookshelf({ t }) {
   return (
     <div style={{ padding: "0 16px 110px" }}>
       <div className="cp-display" style={{ margin: "18px 4px 12px", fontSize: 16, fontWeight: 700, color: t.ink }}>My bookshelf <span style={{ fontSize: 13, color: t.sub }}>책장</span></div>
@@ -815,18 +816,6 @@ function Bookshelf({ t, isPublic, setIsPublic }) {
           <div className="cp-display" style={{ fontSize: 14, fontWeight: 700, color: t.ink }}>Current diary</div>
           <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700, marginTop: 3 }}>더 많은 다이어리는 곧 · more diaries coming soon</div>
         </div>
-      </div>
-
-      {/* public / private toggle (relocated from the old Stickerbook cover) */}
-      <div style={{ marginTop: 20, background: t.paper, borderRadius: 16, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 2px 8px rgba(51,33,26,.08)" }}>
-        <span style={{ fontSize: 24 }}>{isPublic ? "🌍" : "🔒"}</span>
-        <div style={{ flex: 1 }}>
-          <div className="cp-display" style={{ fontWeight: 600, fontSize: 14, color: t.ink }}>{isPublic ? "Share diary" : "Private diary"}</div>
-          <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700 }}>{isPublic ? "others can flip through this diary" : "only you can see this diary (default)"}</div>
-        </div>
-        <button onClick={() => setIsPublic(!isPublic)} aria-label="toggle diary visibility" style={{ border: "none", cursor: "pointer", width: 46, height: 26, borderRadius: 14, background: isPublic ? t.accent : t.accentSoft, position: "relative", transition: "background .2s" }}>
-          <span style={{ position: "absolute", top: 3, left: isPublic ? 23 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left .25s cubic-bezier(.34,1.56,.64,1)", boxShadow: "0 1px 3px rgba(51,33,26,.3)" }} />
-        </button>
       </div>
     </div>
   );
@@ -1076,7 +1065,6 @@ export default function Momenti() {
   const [calendarView, setCalendarView] = useState("month"); // month | week
   const [openDay, setOpenDay] = useState(null); // day number with the full-screen day page open
   const [toast, setToast] = useState(null);
-  const [isPublic, setIsPublic] = useState(false); // session-only diary visibility (Bookshelf placeholder)
   // Beans / packs stay in state + persistence (UI dormant); no setters — nothing mutates them.
   const [beans] = useState(saved?.beans ?? 12);
   const [ownedPacks] = useState(saved?.ownedPacks ?? []);
@@ -1323,7 +1311,7 @@ export default function Momenti() {
               {...surfaceHandlers(MONTH_KEY)}
             />
           )}
-          {tab === "bookshelf" && <Bookshelf t={t} isPublic={isPublic} setIsPublic={setIsPublic} />}
+          {tab === "bookshelf" && <Bookshelf t={t} />}
         </div>
 
         {/* full-screen day page (deco surface b) — paper page-turn in/out */}
