@@ -1878,3 +1878,7 @@ Next recommended development step:
 - 월간 캘린더 셀 + 주간 네비 스트립에 하루 페이지 **대표 콘텐츠 미리보기** 추가. 우선순위: ① 최상단 유효 스티커(가장 큰 `z`, 동률이면 배열 나중) → ② 없으면 비어 있지 않은 텍스트가 있을 때 작성 표시(펜 마크) → ③ 없으면 기존 빈 셀.
 - **파생 렌더링**: 하루 페이지 elements에서 매 렌더 계산(순수 helper `data/dayThumbnail.js`), 신규 저장 필드·persistence 없음. 스티커는 공유 `StickerVisual` 재사용, 새 렌더러 없음. 새 컴포넌트 `components/DayThumbnail.jsx`.
 - 장식 표시(`aria-hidden` + `pointer-events:none`)라 날짜 버튼 클릭·포커스·스크린리더를 방해하지 않음. 저장 스키마 v3·`PageElement`·마이그레이션·undo/redo 불변, 신규 의존성 없음.
+
+### 2026-07-21 — 실제 로컬 날짜 기반 캘린더 (기반 수정)
+
+- 하드코딩된 `2026-07`·`TODAY=15`·`DAYS_IN_MONTH`·`FIRST_WEEKDAY_OFFSET`를 브라우저 **로컬 현재 날짜** 계산으로 교체. 순수 helper `apps/web/src/calendar/dateUtils.js`(월요일 시작, 주입 가능한 기준 날짜, UTC 미사용). 페이지 key는 `YYYY-MM`/`YYYY-MM-DD` 유지, 저장 스키마 v3·마이그레이션 불변(레거시 `2026-07` 데이터는 그대로 보존, 현재 월로 이동하지 않음). 월 이동 UI·자정 자동 갱신은 범위 밖. 로드맵/잠금 결정 불변.

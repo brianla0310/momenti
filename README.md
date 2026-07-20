@@ -12,7 +12,7 @@ The web app is at [`apps/web`](apps/web) — a Vite + React (JSX-first) prototyp
 
 ## Implemented today
 
-- **Monthly / weekly diary** — a decoratable monthly spread + a week strip for navigation
+- **Monthly / weekly diary** — a decoratable monthly spread + a week strip for navigation, following the browser's current local month
 - **Full-screen day pages** — tap a day → a 3:4 portrait page that opens with a paper page-turn
 - **Day thumbnails** — each calendar cell (month + week strip) previews its day's top sticker, or a small mark for a text-only day — derived live from the page, never stored
 - **Stickers** — place emoji stickers on a page, then move / duplicate / peel them back with hold-lift-drag physics and a return zone
