@@ -15,7 +15,13 @@ import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSE
 import { createPageElement } from "./data/pageElements";
 import StickerVisual from "./components/StickerVisual";
 import DayThumbnail from "./components/DayThumbnail";
-import { createCalendarContext, getWeekDayNumbers, isFutureLocalDay } from "./calendar/dateUtils";
+import MonthNavigation from "./components/MonthNavigation";
+import MonthPickerSheet from "./components/MonthPickerSheet";
+import {
+  createCalendarContext, createMonthContext, isFutureLocalDay,
+  isFutureMonth, compareYearMonth, addMonths, clampDayToMonth, dayKeyOf,
+  addDaysLocal, getLocalWeekDays, isSameLocalWeek,
+} from "./calendar/dateUtils";
 
 /* ---------- theme tokens ---------- */
 /* single warm palette (the old caffe theme); gelato branch removed in the
@@ -81,7 +87,8 @@ const CAL = createCalendarContext();
    fixed 2026-07 spread. Migrations preserve that historical key verbatim —
    they never move old placements onto the current local month. */
 const LEGACY_MONTH_KEY = "2026-07";
-const dayKeyFor = (d) => `${CAL.monthKey}-${String(d).padStart(2, "0")}`;
+/* dayKeyFor moved INTO the app shell — day keys derive from the VISIBLE month
+   (past-month navigation), not a fixed module-level month. See Momenti(). */
 const BOOK_PAGE_SIZE = 8;
 
 /* text elements (day pages only, §D6 — deliberately minimal, nothing more):
@@ -547,31 +554,49 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
   );
 }
 
-function Diary({ t, view, cal, monthElements, dayElements, resolveAsset, onOpenBook, onOpenDay, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
+function Diary({ t, view, cal, weekCells, monthElements, dayElements, resolveAsset, onOpenBook, onOpenDay, onPrevMonth, onNextMonth, canGoNextMonth, onPrevWeek, onNextWeek, canGoNextWeek, isCurrentMonth, isCurrentWeek, onOpenMonthPicker, onToday, monthTitleRef, placing, onCancelPlacing, onPlaceAt, onMove, onReturn, onDuplicate, onRemove }) {
   const cardRef = useRef(null); // calendar card = the monthly-spread surface
 
-  // current local month: leading blanks up to the 1st's weekday, then its days
+  // month grid: leading blanks (null) up to the 1st's weekday, then its days.
+  // `null` cells are alignment placeholders — rendered as neutral empty slots,
+  // NEVER date buttons (see below); the week strip uses real dates from props.
   const cells = [];
   for (let i = 0; i < cal.firstWeekdayOffset; i++) cells.push(null);
   for (let d = 1; d <= cal.daysInMonth; d++) cells.push(d);
 
-  // week strip: the Mon→Sun week containing today; out-of-month slots are null
-  const weekCells = getWeekDayNumbers(cal);
   const WEEKDAYS = ["LU", "MA", "ME", "GI", "VE", "SA", "DO"];
+  // arrows + Oggi follow the active view: months in month view, weeks in week view
+  const week = view === "week";
+  const showOggi = week ? !isCurrentWeek : !isCurrentMonth;
 
   return (
     <div style={{ padding: "0 16px 110px" }}>
-      {/* header card */}
-      <div style={{ position: "relative", marginTop: 18, background: t.paper, borderRadius: 20, padding: "16px 18px 14px", boxShadow: "0 3px 12px rgba(51,33,26,.09)" }}>
+      {/* header card: month navigation (prev · title/picker · next) + Oggi */}
+      <div style={{ position: "relative", marginTop: 18, background: t.paper, borderRadius: 20, padding: "14px 16px 12px", boxShadow: "0 3px 12px rgba(51,33,26,.09)" }}>
         <Tape t={t} rot={-3} />
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <div>
-            <div className="cp-display" style={{ fontSize: 24, fontWeight: 700, color: t.ink }}>{cal.monthYearCap}</div>
-            <div style={{ fontSize: 12.5, color: t.sub, fontWeight: 700 }}>
-              {view === "week" ? "this week" : "your sticker diary"} · tap + to add stickers
-            </div>
-          </div>
-          <span className="cp-sticker cp-bob" style={{ fontSize: 34 }}>📖</span>
+        <MonthNavigation
+          t={t} cal={cal}
+          onPrev={week ? onPrevWeek : onPrevMonth}
+          onNext={week ? onNextWeek : onNextMonth}
+          canGoNext={week ? canGoNextWeek : canGoNextMonth}
+          prevLabel={week ? "Previous week" : "Previous month"}
+          nextLabel={week ? "Next week" : "Next month"}
+          onOpenPicker={onOpenMonthPicker} titleRef={monthTitleRef}
+        />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: t.sub, fontWeight: 700 }}>
+            {week ? "this week" : "your sticker diary"} · tap + to add stickers
+          </span>
+          {/* Oggi appears only while browsing away from today's month/week, in
+              the decorative slot; on today it keeps the little bob book (§6) */}
+          {showOggi ? (
+            <button onClick={onToday} aria-label={week ? "Torna alla settimana corrente" : "Torna al mese corrente"} className="cp-display" style={{
+              border: "none", background: t.accentSoft, color: t.accent, borderRadius: 999,
+              padding: "7px 13px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", flexShrink: 0,
+            }}>Oggi</button>
+          ) : (
+            <span className="cp-sticker cp-bob" style={{ fontSize: 26, flexShrink: 0 }}>📖</span>
+          )}
         </div>
       </div>
 
@@ -602,35 +627,36 @@ function Diary({ t, view, cal, monthElements, dayElements, resolveAsset, onOpenB
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
               {cells.map((d, i) => {
+                // alignment placeholder (leading blank): a neutral empty grid
+                // slot — never a date button, so no today/disabled styling can
+                // land on it, no date/thumbnail, no click, not focusable. Keeps
+                // the cell's footprint so the grid stays aligned.
+                if (d == null) return <div key={i} aria-hidden style={{ aspectRatio: "1" }} />;
                 const isToday = d === cal.todayDay;
-                const future = d != null && isFutureLocalDay(cal.year, cal.monthIndex, d, cal.today);
+                const future = isFutureLocalDay(cal.year, cal.monthIndex, d, cal.today);
                 return (
                   <button
                     key={i}
-                    onClick={() => d && !future && onOpenDay(d)}
-                    disabled={!d || future}
-                    aria-label={d ? `open day ${d}` : undefined}
+                    onClick={() => !future && onOpenDay(cal.year, cal.monthIndex, d)}
+                    disabled={future}
+                    aria-label={`open day ${d}`}
                     style={{
                       aspectRatio: "1", borderRadius: 12, position: "relative", padding: 0,
-                      border: "none", background: "transparent", cursor: d && !future ? "pointer" : "default",
+                      border: "none", background: "transparent", cursor: future ? "default" : "pointer",
                       ...(isToday ? { background: t.accentSoft, boxShadow: `inset 0 0 0 2px ${t.accent}` } : {}),
                     }}
                   >
-                    {d && (
-                      <span style={{
-                        position: "absolute", top: 3, left: 5, fontSize: 9.5, fontWeight: 800,
-                        color: future ? "rgba(0,0,0,.18)" : isToday ? t.accent : t.sub,
-                      }}>{d}</span>
-                    )}
+                    <span style={{
+                      position: "absolute", top: 3, left: 5, fontSize: 9.5, fontWeight: 800,
+                      color: future ? "rgba(0,0,0,.18)" : isToday ? t.accent : t.sub,
+                    }}>{d}</span>
                     {/* read-only day preview: sits in the lower cell, clear of the
                         date number; pointer-events:none keeps the button clickable */}
-                    {d && (
-                      <DayThumbnail
-                        elements={dayElements(d)} resolveAsset={resolveAsset}
-                        size={18} subColor={t.sub}
-                        style={{ position: "absolute", left: 0, right: 0, top: "38%", bottom: 2, overflow: "hidden" }}
-                      />
-                    )}
+                    <DayThumbnail
+                      elements={dayElements(d)} resolveAsset={resolveAsset}
+                      size={18} subColor={t.sub}
+                      style={{ position: "absolute", left: 0, right: 0, top: "38%", bottom: 2, overflow: "hidden" }}
+                    />
                   </button>
                 );
               })}
@@ -638,36 +664,31 @@ function Diary({ t, view, cal, monthElements, dayElements, resolveAsset, onOpenB
           </>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
-            {weekCells.map((d, i) => {
-              const isToday = d === cal.todayDay;
-              const future = d != null && isFutureLocalDay(cal.year, cal.monthIndex, d, cal.today);
-              return (
-                <button
-                  key={i}
-                  onClick={() => d && !future && onOpenDay(d)}
-                  disabled={!d || future}
-                  aria-label={d ? `open day ${d}` : undefined}
-                  style={{
-                    minHeight: 66, borderRadius: 12, position: "relative",
-                    display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 7,
-                    border: "none", cursor: d && !future ? "pointer" : "default",
-                    background: isToday ? t.accentSoft : "transparent",
-                    boxShadow: isToday ? `inset 0 0 0 2px ${t.accent}` : "none",
-                  }}
-                >
-                  <span className="cp-display" style={{ fontSize: 10, fontWeight: 600, color: i >= 5 ? t.accent : t.sub }}>{WEEKDAYS[i]}</span>
-                  {d && <span style={{ fontSize: 16, fontWeight: 800, marginTop: 5, color: future ? "rgba(0,0,0,.18)" : isToday ? t.accent : t.ink }}>{d}</span>}
-                  {/* same shared selection rule as the month cells; strip stays nav-only */}
-                  {d && (
-                    <DayThumbnail
-                      elements={dayElements(d)} resolveAsset={resolveAsset}
-                      size={22} subColor={t.sub}
-                      style={{ marginTop: 4, height: 26 }}
-                    />
-                  )}
-                </button>
-              );
-            })}
+            {weekCells.map((cell, i) => (
+              <button
+                key={cell.dayKey}
+                onClick={() => !cell.isFuture && onOpenDay(cell.year, cell.monthIndex, cell.day)}
+                disabled={cell.isFuture}
+                aria-label={`open day ${cell.day}`}
+                style={{
+                  minHeight: 66, borderRadius: 12, position: "relative",
+                  display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 7,
+                  border: "none", cursor: cell.isFuture ? "default" : "pointer",
+                  background: cell.isToday ? t.accentSoft : "transparent",
+                  boxShadow: cell.isToday ? `inset 0 0 0 2px ${t.accent}` : "none",
+                }}
+              >
+                <span className="cp-display" style={{ fontSize: 10, fontWeight: 600, color: i >= 5 ? t.accent : t.sub }}>{WEEKDAYS[i]}</span>
+                <span style={{ fontSize: 16, fontWeight: 800, marginTop: 5, color: cell.isFuture ? "rgba(0,0,0,.18)" : cell.isToday ? t.accent : t.ink }}>{cell.day}</span>
+                {/* each cell uses its OWN real day key (cross-month days included);
+                    strip stays navigation-only, same shared thumbnail rule */}
+                <DayThumbnail
+                  elements={cell.elements} resolveAsset={resolveAsset}
+                  size={22} subColor={t.sub}
+                  style={{ marginTop: 4, height: 26 }}
+                />
+              </button>
+            ))}
           </div>
         )}
 
@@ -1086,6 +1107,19 @@ export default function Momenti() {
   const [calendarView, setCalendarView] = useState("month"); // month | week
   const [openDay, setOpenDay] = useState(null); // day number with the full-screen day page open
   const [toast, setToast] = useState(null);
+
+  /* which month the diary is showing (navigation only — NOT persisted; a
+     refresh always starts on the real current month, CAL). `visibleMonth` is
+     year + 0-based monthIndex; everything the calendar renders is derived from
+     it via createMonthContext. Never a future month (guarded on change). */
+  const [visibleMonth, setVisibleMonth] = useState(() => ({ year: CAL.year, monthIndex: CAL.monthIndex }));
+  /* the reference LOCAL DATE the week strip is built around — a full descriptor
+     { year, monthIndex, day }, not just a day-of-month, so week paging can add
+     ±7 days across month/year boundaries. Starts on today; carried (clamped)
+     across a month switch or set to an opened/navigated day. Never persisted. */
+  const [weekAnchor, setWeekAnchor] = useState(() => ({ year: CAL.year, monthIndex: CAL.monthIndex, day: CAL.todayDay }));
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const monthTitleRef = useRef(null); // focus returns here when the picker closes
   // Beans / packs stay in state + persistence (UI dormant); no setters — nothing mutates them.
   const [beans] = useState(saved?.beans ?? 12);
   const [ownedPacks] = useState(saved?.ownedPacks ?? []);
@@ -1114,6 +1148,20 @@ export default function Momenti() {
 
   const t = THEME;
 
+  /* calendar frame for the VISIBLE month — derived every render, never stored
+     (§4). The monthly spread, day cells, and day thumbnails all read this; CAL
+     stays the fixed "real today" reference for future-day/month checks. */
+  const viewCal = createMonthContext(visibleMonth.year, visibleMonth.monthIndex, CAL.today);
+  /* day-page key for a day-of-month IN THE VISIBLE MONTH ("YYYY-MM-DD"). */
+  const dayKeyFor = (d) => dayKeyOf(visibleMonth.year, visibleMonth.monthIndex, d);
+  /* Next-month is enabled only while the visible month is before the real one. */
+  const canGoNextMonth = compareYearMonth(visibleMonth, CAL.today) < 0;
+  /* week strip: real Mon→Sun dates around the anchor. Each cell carries its OWN
+     day key (cross-month days use their real month, never the visible month) so
+     the strip pages weeks freely without ever building a wrong key. */
+  const isCurrentWeek = isSameLocalWeek(weekAnchor, CAL.today);
+  const canGoNextWeek = !isCurrentWeek; // never page past the week containing today
+
   /* resolve a placed element's design — base seed assets + user-made ones */
   const resolveAsset = (id) => ASSET_BY_ID[id] ?? userAssets.find((a) => a.id === id);
 
@@ -1128,7 +1176,22 @@ export default function Momenti() {
     });
   };
   /* the surface the Stickerbook overlay targets: open day page, else monthly spread */
-  const activeSurfaceKey = openDay != null ? dayKeyFor(openDay) : CAL.monthKey;
+  const activeSurfaceKey = openDay != null ? dayKeyFor(openDay) : viewCal.monthKey;
+
+  /* week strip descriptors — 7 real Mon→Sun dates around the anchor, each with
+     its OWN "YYYY-MM-DD" key + today/future flags + live elements. Cross-month
+     days keep their real month, so opening/preview never mixes months (§4·5). */
+  const weekCells = getLocalWeekDays(weekAnchor).map((c) => {
+    const dayKey = dayKeyOf(c.year, c.monthIndex, c.day);
+    return {
+      ...c,
+      dayKey,
+      isToday: c.year === CAL.today.year && c.monthIndex === CAL.today.monthIndex && c.day === CAL.today.day,
+      isFuture: isFutureLocalDay(c.year, c.monthIndex, c.day, CAL.today),
+      isCurrentVisibleMonth: c.year === visibleMonth.year && c.monthIndex === visibleMonth.monthIndex,
+      elements: elementsOf(dayKey),
+    };
+  });
 
   /* persist durable state on change (single versioned blob, v3) */
   useEffect(() => {
@@ -1249,9 +1312,59 @@ export default function Momenti() {
       onUpdate: withUndo((id, patch) => updateElement(pageKey, id, patch)),
     };
   };
-  /* day page open/close resets the session-scoped history + edit mode */
-  const openDayPage = (d) => { clearDayHistory(); setEditingTextId(null); setOpenDay(d); };
+  /* day page open/close resets the session-scoped history + edit mode. Opens by
+     a FULL date (a week cell may be in a month adjacent to the visible one), so
+     it also syncs visibleMonth + anchors the week strip to that day — switching
+     to week view (or closing back) keeps that day's week in view (§11). */
+  const openDayPage = (year, monthIndex, day) => {
+    clearDayHistory();
+    setEditingTextId(null);
+    setWeekAnchor({ year, monthIndex, day });
+    setVisibleMonth({ year, monthIndex }); // keep the open day's month in the header/spread
+    setOpenDay(day);
+  };
   const closeDayPage = () => { clearDayHistory(); setEditingTextId(null); setOpenDay(null); };
+
+  /* ── calendar navigation (§5·6·9) — selection only, never touches persistence ──
+     Leaving a month/week tears down anything scoped to the old surface so no
+     stale active day / edit / placement / undo history bleeds across (§8·10).
+     (Arrows sit under the day-page overlay, so this only runs with it closed —
+     the setState-to-null calls then no-op/bail out.) */
+  const resetMonthSession = () => {
+    setOpenDay(null);
+    setEditingTextId(null);
+    setPlacingSticker(null);
+    clearDayHistory();
+  };
+  const changeMonth = (year, monthIndex) => {
+    if (isFutureMonth({ year, monthIndex }, CAL.today)) return; // never navigate into the future
+    resetMonthSession();
+    setWeekAnchor({ year, monthIndex, day: clampDayToMonth(year, monthIndex, weekAnchor.day) }); // keep day-of-month, clamped
+    setVisibleMonth({ year, monthIndex });
+    setMonthPickerOpen(false);
+  };
+  const goPrevMonth = () => { const m = addMonths(visibleMonth.year, visibleMonth.monthIndex, -1); changeMonth(m.year, m.monthIndex); };
+  const goNextMonth = () => { const m = addMonths(visibleMonth.year, visibleMonth.monthIndex, 1); changeMonth(m.year, m.monthIndex); };
+
+  /* week paging: anchor ±7 real days; the header/visibleMonth follow the anchor
+     into its month so a later switch to month view lands there (§4·5). */
+  const goToWeekAnchor = (anchor) => {
+    resetMonthSession();
+    setWeekAnchor(anchor);
+    setVisibleMonth({ year: anchor.year, monthIndex: anchor.monthIndex });
+  };
+  const goPrevWeek = () => goToWeekAnchor(addDaysLocal(weekAnchor, -7));
+  const goNextWeek = () => { if (!isCurrentWeek) goToWeekAnchor(addDaysLocal(weekAnchor, 7)); }; // never past today's week
+
+  /* Oggi: jump back to today — sets the anchor + visibleMonth to the real
+     current date, so month view shows this month and week view shows this
+     week (§6). One handler serves both modes. */
+  const goToToday = () => {
+    resetMonthSession();
+    setWeekAnchor({ year: CAL.year, monthIndex: CAL.monthIndex, day: CAL.todayDay });
+    setVisibleMonth({ year: CAL.year, monthIndex: CAL.monthIndex });
+    setMonthPickerOpen(false);
+  };
 
   /* Ctrl/Cmd+Z (undo) · +Shift or Ctrl+Y (redo) while a day page is open.
      Typing in the textarea keeps the browser's native text undo. */
@@ -1325,14 +1438,21 @@ export default function Momenti() {
         <div style={{ height: "100vh", overflowY: "auto", paddingTop: 50 }} className="cp-scroll">
           {tab === "diario" && (
             <Diary
-              t={t} cal={CAL} view={calendarView}
-              monthElements={elementsOf(CAL.monthKey)} resolveAsset={resolveAsset}
+              t={t} cal={viewCal} view={calendarView} weekCells={weekCells}
+              monthElements={elementsOf(viewCal.monthKey)} resolveAsset={resolveAsset}
               dayElements={(d) => elementsOf(dayKeyFor(d))}
               onOpenBook={() => setBookOpen(true)}
               onOpenDay={openDayPage}
-              {...surfaceHandlers(CAL.monthKey)}
+              onPrevMonth={goPrevMonth} onNextMonth={goNextMonth} canGoNextMonth={canGoNextMonth}
+              onPrevWeek={goPrevWeek} onNextWeek={goNextWeek} canGoNextWeek={canGoNextWeek}
+              isCurrentMonth={viewCal.isCurrentMonth} isCurrentWeek={isCurrentWeek}
+              onOpenMonthPicker={() => setMonthPickerOpen(true)}
+              onToday={goToToday} monthTitleRef={monthTitleRef}
+              {...surfaceHandlers(viewCal.monthKey)}
             />
           )}
+          {/* Bookshelf keeps the real current-month label — the book's identity
+              shouldn't flip as you browse past months (§13). */}
           {tab === "bookshelf" && <Bookshelf t={t} cal={CAL} />}
         </div>
 
@@ -1340,7 +1460,7 @@ export default function Momenti() {
         {openDay != null && (
           <DayPage
             key={openDay}
-            t={t} cal={CAL} day={openDay}
+            t={t} cal={viewCal} day={openDay}
             elements={elementsOf(dayKeyFor(openDay))} resolveAsset={resolveAsset}
             onOpenBook={() => setBookOpen(true)}
             onClose={closeDayPage}
@@ -1378,6 +1498,17 @@ export default function Momenti() {
 
         {/* overlays */}
         {bookOpen && <StickerbookSheet t={t} page={bookPage} setPage={setBookPage} onPick={pickFromBook} onClose={() => setBookOpen(false)} userAssets={userAssets} onCreate={createUserSticker} />}
+        {monthPickerOpen && (
+          <MonthPickerSheet
+            t={t}
+            visibleMonth={visibleMonth}
+            today={CAL.today}
+            onSelect={changeMonth}
+            onToday={goToToday}
+            onClose={() => setMonthPickerOpen(false)}
+            returnFocusRef={monthTitleRef}
+          />
+        )}
       </div>
     </div>
   );

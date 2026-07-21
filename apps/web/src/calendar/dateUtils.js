@@ -92,27 +92,106 @@ export function getWeekDayNumbers({ firstWeekdayOffset, todayDay, daysInMonth })
 }
 
 /**
- * Snapshot of the local calendar frame the whole app renders against.
- * Captured once at load (a stable session snapshot — no midnight auto-roll).
- * Pass a base date to inject a fixed "now" for tests / manual verification.
- * @param {Date} [now]
+ * Calendar frame for ANY local month (monthIndex 0-based) — the frame the
+ * monthly spread, day cells, and day thumbnails all render against. Powers
+ * past-month navigation: the visible month is derived through here.
+ *
+ * `todayDay` is set ONLY when this month IS the real current month, so the
+ * "today" ring never appears while browsing another month; `today` always
+ * carries the real local today for future-day comparisons.
+ * @param {number} year
+ * @param {number} monthIndex   0-based
+ * @param {{year:number,monthIndex:number,day:number}} today  the real local today
  */
-export function createCalendarContext(now = new Date()) {
-  const year = now.getFullYear();
-  const monthIndex = now.getMonth(); // 0-based
-  const todayDay = now.getDate();
-  const monthYear = formatMonthYear(now);
+export function createMonthContext(year, monthIndex, today) {
+  const firstOfMonth = new Date(year, monthIndex, 1); // local, for locale labels only
+  const isCurrentMonth = year === today.year && monthIndex === today.monthIndex;
+  const monthYear = formatMonthYear(firstOfMonth);
   return {
     year,
     monthIndex,
-    todayDay,
-    today: { year, monthIndex, day: todayDay },
-    monthKey: getMonthKey(now),                 // "YYYY-MM"  — monthly-spread page key
-    todayKey: getDayKey(now),                   // "YYYY-MM-DD"
+    isCurrentMonth,
+    today,                                          // real local today (future-day checks)
+    todayDay: isCurrentMonth ? today.day : null,    // highlight "today" only in the real month
+    monthKey: `${year}-${pad2(monthIndex + 1)}`,    // "YYYY-MM"  — monthly-spread page key
     daysInMonth: getDaysInMonth(year, monthIndex),
     firstWeekdayOffset: getMondayFirstOffset(year, monthIndex),
-    monthName: formatMonthName(now),            // "luglio"       (lowercase, day-page style)
-    monthYear,                                  // "luglio 2026"  (lowercase)
-    monthYearCap: cap(monthYear),               // "Luglio 2026"  (header/cover style)
+    monthName: formatMonthName(firstOfMonth),       // "luglio"       (lowercase, day-page style)
+    monthYear,                                      // "luglio 2026"  (lowercase)
+    monthYearCap: cap(monthYear),                   // "Luglio 2026"  (header/cover style)
   };
+}
+
+/**
+ * Snapshot of the local calendar frame captured once at load — the real
+ * current month (a stable session snapshot; no midnight auto-roll). Wraps
+ * {@link createMonthContext} for the current month and adds the day-precise
+ * `todayKey` only the live snapshot needs. Pass a base date to inject a fixed
+ * "now" for tests / manual verification.
+ * @param {Date} [now]
+ */
+export function createCalendarContext(now = new Date()) {
+  const today = { year: now.getFullYear(), monthIndex: now.getMonth(), day: now.getDate() };
+  return {
+    ...createMonthContext(today.year, today.monthIndex, today),
+    todayKey: getDayKey(now),                       // "YYYY-MM-DD"
+  };
+}
+
+/* ── month-navigation helpers (pure; used by past-month browsing) ── */
+
+/** Add `amount` months to (year, monthIndex), carrying across year boundaries. */
+export function addMonths(year, monthIndex, amount) {
+  const total = year * 12 + monthIndex + amount;
+  return { year: Math.floor(total / 12), monthIndex: ((total % 12) + 12) % 12 };
+}
+
+/** Compare two {year, monthIndex}: <0 if a is earlier, 0 if same, >0 if a is later. */
+export function compareYearMonth(a, b) {
+  return a.year !== b.year ? a.year - b.year : a.monthIndex - b.monthIndex;
+}
+
+/** Is `candidate` {year, monthIndex} a later month than `today`? (day ignored) */
+export function isFutureMonth(candidate, today) {
+  return compareYearMonth(candidate, today) > 0;
+}
+
+/** Clamp a day-of-month into [1, daysInMonth] for (year, monthIndex). */
+export function clampDayToMonth(year, monthIndex, day) {
+  return Math.min(Math.max(day, 1), getDaysInMonth(year, monthIndex));
+}
+
+/** The 12 capitalized month names for a locale (index 0 = January). UI labels only. */
+export function getMonthNames(locale = "it-IT") {
+  return Array.from({ length: 12 }, (_, m) => cap(formatMonthName(new Date(2021, m, 1), locale)));
+}
+
+/* ── local-week helpers (pure) — real dates, so the week strip can page ±7 days
+   across month/year boundaries. A descriptor is { year, monthIndex, day }.
+   All math goes through Date's local normalization; no Date is mutated and no
+   UTC/ISO string is ever used as a comparison key. ── */
+
+/** Shift a local date descriptor by `amount` days (normalizes month/year/leap). */
+export function addDaysLocal({ year, monthIndex, day }, amount) {
+  const d = new Date(year, monthIndex, day + amount); // JS normalizes overflow, local
+  return { year: d.getFullYear(), monthIndex: d.getMonth(), day: d.getDate() };
+}
+
+/** The Monday (Monday-first week) of the week containing `descriptor`. */
+export function startOfLocalWeek(descriptor) {
+  const { year, monthIndex, day } = descriptor;
+  const offset = (new Date(year, monthIndex, day).getDay() + 6) % 7; // 0 = Mon … 6 = Sun
+  return addDaysLocal(descriptor, -offset);
+}
+
+/** The 7 Monday→Sunday local date descriptors for the week containing `anchor`. */
+export function getLocalWeekDays(anchor) {
+  const start = startOfLocalWeek(anchor);
+  return Array.from({ length: 7 }, (_, i) => addDaysLocal(start, i));
+}
+
+/** Do two descriptors fall in the same Monday-first local week? */
+export function isSameLocalWeek(a, b) {
+  const sa = startOfLocalWeek(a), sb = startOfLocalWeek(b);
+  return sa.year === sb.year && sa.monthIndex === sb.monthIndex && sa.day === sb.day;
 }
