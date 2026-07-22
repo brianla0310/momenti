@@ -58,6 +58,20 @@ export function isFutureLocalDay(year, monthIndex, day, today) {
   return day > today.day;
 }
 
+/**
+ * Clamp a local date descriptor so it never falls after `today`: a future day
+ * collapses to `today`, a past-or-today day passes through unchanged. Pure
+ * component comparison — no UTC/ISO. This is the single boundary that keeps the
+ * week anchor from ever pointing past the real current day (§ future-week fix).
+ * @param {{year:number,monthIndex:number,day:number}} descriptor
+ * @param {{year:number,monthIndex:number,day:number}} today  the real local today
+ */
+export function clampDescriptorToToday(descriptor, today) {
+  return isFutureLocalDay(descriptor.year, descriptor.monthIndex, descriptor.day, today)
+    ? { year: today.year, monthIndex: today.monthIndex, day: today.day }
+    : descriptor;
+}
+
 /** Lowercase Italian month name, e.g. "luglio". Small safe fallback if Intl fails. */
 export function formatMonthName(date, locale = "it-IT") {
   try {
@@ -74,21 +88,6 @@ export function formatMonthYear(date, locale = "it-IT") {
   } catch {
     return `${pad2(date.getMonth() + 1)}/${date.getFullYear()}`;
   }
-}
-
-/**
- * The 7 Monday→Sunday day-of-month numbers for the week containing `todayDay`.
- * Slots outside the current month are null — this build renders a single month
- * with no month navigation, so cross-month days show as empty (never a
- * mismatched key). Derived from the month frame, not from raw day arithmetic.
- */
-export function getWeekDayNumbers({ firstWeekdayOffset, todayDay, daysInMonth }) {
-  const weekdayOfToday = (firstWeekdayOffset + todayDay - 1) % 7;
-  const weekStart = todayDay - weekdayOfToday; // day-of-month of this week's Monday (may be < 1)
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = weekStart + i;
-    return d >= 1 && d <= daysInMonth ? d : null;
-  });
 }
 
 /**

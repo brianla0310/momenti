@@ -19,7 +19,7 @@ import MonthNavigation from "./components/MonthNavigation";
 import MonthPickerSheet from "./components/MonthPickerSheet";
 import {
   createCalendarContext, createMonthContext, isFutureLocalDay,
-  isFutureMonth, compareYearMonth, addMonths, clampDayToMonth, dayKeyOf,
+  isFutureMonth, compareYearMonth, addMonths, clampDayToMonth, clampDescriptorToToday, dayKeyOf,
   addDaysLocal, getLocalWeekDays, isSameLocalWeek,
 } from "./calendar/dateUtils";
 
@@ -1188,7 +1188,6 @@ export default function Momenti() {
       dayKey,
       isToday: c.year === CAL.today.year && c.monthIndex === CAL.today.monthIndex && c.day === CAL.today.day,
       isFuture: isFutureLocalDay(c.year, c.monthIndex, c.day, CAL.today),
-      isCurrentVisibleMonth: c.year === visibleMonth.year && c.monthIndex === visibleMonth.monthIndex,
       elements: elementsOf(dayKey),
     };
   });
@@ -1312,14 +1311,22 @@ export default function Momenti() {
       onUpdate: withUndo((id, patch) => updateElement(pageKey, id, patch)),
     };
   };
+  /* every week-anchor write funnels through here so the anchor can NEVER point
+     past the real current day (§ future-week fix): a would-be future descriptor
+     collapses to today. The invariant `weekAnchor <= CAL.today` is enforced at
+     the set boundary, not by disabling buttons — so no month/week/day path can
+     leave a future anchor behind for week view to page into. */
+  const commitWeekAnchor = (descriptor) => setWeekAnchor(clampDescriptorToToday(descriptor, CAL.today));
+
   /* day page open/close resets the session-scoped history + edit mode. Opens by
      a FULL date (a week cell may be in a month adjacent to the visible one), so
      it also syncs visibleMonth + anchors the week strip to that day — switching
-     to week view (or closing back) keeps that day's week in view (§11). */
+     to week view (or closing back) keeps that day's week in view (§11). Opens are
+     already future-guarded in the UI, so the anchor clamp is a structural no-op here. */
   const openDayPage = (year, monthIndex, day) => {
     clearDayHistory();
     setEditingTextId(null);
-    setWeekAnchor({ year, monthIndex, day });
+    commitWeekAnchor({ year, monthIndex, day });
     setVisibleMonth({ year, monthIndex }); // keep the open day's month in the header/spread
     setOpenDay(day);
   };
@@ -1339,7 +1346,12 @@ export default function Momenti() {
   const changeMonth = (year, monthIndex) => {
     if (isFutureMonth({ year, monthIndex }, CAL.today)) return; // never navigate into the future
     resetMonthSession();
-    setWeekAnchor({ year, monthIndex, day: clampDayToMonth(year, monthIndex, weekAnchor.day) }); // keep day-of-month, clamped
+    // keep the day-of-month (clamped to the target month's length), then never
+    // let the anchor land after today: returning to the CURRENT month with a
+    // day past today collapses to today; a PAST month keeps its real day. The
+    // clamp never changes the month here (future months already returned), so
+    // visibleMonth stays the target month.
+    commitWeekAnchor({ year, monthIndex, day: clampDayToMonth(year, monthIndex, weekAnchor.day) });
     setVisibleMonth({ year, monthIndex });
     setMonthPickerOpen(false);
   };
@@ -1347,11 +1359,16 @@ export default function Momenti() {
   const goNextMonth = () => { const m = addMonths(visibleMonth.year, visibleMonth.monthIndex, 1); changeMonth(m.year, m.monthIndex); };
 
   /* week paging: anchor ±7 real days; the header/visibleMonth follow the anchor
-     into its month so a later switch to month view lands there (§4·5). */
+     into its month so a later switch to month view lands there (§4·5). Paging
+     forward can land on a day past today inside the current week (e.g. today is
+     the last of the month and +7 crosses into the next month) — clamp to today
+     FIRST, then derive visibleMonth from the clamped anchor so the two never
+     disagree about the month. */
   const goToWeekAnchor = (anchor) => {
+    const clamped = clampDescriptorToToday(anchor, CAL.today);
     resetMonthSession();
-    setWeekAnchor(anchor);
-    setVisibleMonth({ year: anchor.year, monthIndex: anchor.monthIndex });
+    setWeekAnchor(clamped);
+    setVisibleMonth({ year: clamped.year, monthIndex: clamped.monthIndex });
   };
   const goPrevWeek = () => goToWeekAnchor(addDaysLocal(weekAnchor, -7));
   const goNextWeek = () => { if (!isCurrentWeek) goToWeekAnchor(addDaysLocal(weekAnchor, 7)); }; // never past today's week
@@ -1361,7 +1378,7 @@ export default function Momenti() {
      week (§6). One handler serves both modes. */
   const goToToday = () => {
     resetMonthSession();
-    setWeekAnchor({ year: CAL.year, monthIndex: CAL.monthIndex, day: CAL.todayDay });
+    commitWeekAnchor({ year: CAL.year, monthIndex: CAL.monthIndex, day: CAL.todayDay });
     setVisibleMonth({ year: CAL.year, monthIndex: CAL.monthIndex });
     setMonthPickerOpen(false);
   };
