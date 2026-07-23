@@ -11,8 +11,11 @@ import { BookOpen, Library, Plus, X, Undo2, Redo2 } from "lucide-react";
 // and the warm ink palette for text elements.
 import { FONTS } from "./design/typography";
 import { STICKER, COLORS } from "./design/tokens";
-import { createStickerAsset, createStickerInstance, seedStickerAssets, FREE_ASSET_LIMIT } from "./data/stickers";
+import { createStickerAsset, seedStickerAssets, FREE_ASSET_LIMIT } from "./data/stickers";
 import { createPageElement } from "./data/pageElements";
+import {
+  STORAGE_KEY, DIARY_ID, resolvePersistedState, serializePersistedState,
+} from "./data/persistence";
 import StickerVisual from "./components/StickerVisual";
 import DayThumbnail from "./components/DayThumbnail";
 import MonthNavigation from "./components/MonthNavigation";
@@ -77,16 +80,12 @@ const STICKER_ASSETS = seedStickerAssets({
 const ASSET_BY_ID = Object.fromEntries(STICKER_ASSETS.map((a) => [a.id, a]));
 /* Single diary until the multiple-diaries PR (§D4) — structure is v3-ready.
    Surfaces are keyed pages: the monthly spread is "YYYY-MM" (e.g. "2026-07")
-   and each day page is "YYYY-MM-DD" (e.g. "2026-07-15"). */
-const DIARY_ID = "diary-1";
+   and each day page is "YYYY-MM-DD" (e.g. "2026-07-15"). DIARY_ID + the storage
+   key/version/migrations now live in ./data/persistence (imported above). */
 /* live calendar frame from the browser's LOCAL date, captured once at load
    (a stable session snapshot — no midnight auto-roll; that's a later item).
    Injectable base date + all date math live in ./calendar/dateUtils. */
 const CAL = createCalendarContext();
-/* legacy monthly-spread key: pre-local-date data (v1/v2) was placed on the
-   fixed 2026-07 spread. Migrations preserve that historical key verbatim —
-   they never move old placements onto the current local month. */
-const LEGACY_MONTH_KEY = "2026-07";
 /* dayKeyFor moved INTO the app shell — day keys derive from the VISIBLE month
    (past-month navigation), not a fixed module-level month. See Momenti(). */
 const BOOK_PAGE_SIZE = 8;
@@ -1038,77 +1037,74 @@ function StickerCreatorSheet({ t, onClose, onCreate }) {
 }
 
 /* ═══════════════ localStorage persistence (v3, §D4) ═══════════════ */
-// One versioned JSON blob under a single key.
+// One versioned JSON blob under a single key. The parse / validate / migrate
+// RULES are the pure ./data/persistence module; this file owns only the browser
+// I/O (getItem here, setItem in the save effect) and the resulting UI states.
 //   v3: { version: 3, diaries: [{id,name}], activeDiaryId,
 //         pages: { [diaryId]: { [pageKey]: { elements: PageElement[] } } },
 //         userAssets, beans, ownedPacks }
 //   pageKey: "YYYY-MM" = monthly spread · "YYYY-MM-DD" = day page (local month).
 // Ephemeral state (modals/sheets, active tab, toasts) is never persisted.
-const STORAGE_KEY = "momenti.v1";
 
-// v1 → v2: legacy placements ({ id, assetId, emoji, name, x, y, rot })
-// become StickerInstances referencing assets by id.
-function migrateV1toV2(v1) {
-  const pageStickers = Array.isArray(v1.pageStickers)
-    ? v1.pageStickers.map((p) => createStickerInstance({
-        id: p.id,
-        assetId: p.assetId,
-        x: p.x, y: p.y,
-        rotation: p.rot,               // v1 used `rot`
-        scale: 1,
-        placedAt: p.placedAt ?? Date.now(),
-        page: LEGACY_MONTH_KEY,        // legacy data stays on its historical 2026-07 spread
-      }))
-    : [];
-  return { version: 2, entries: v1.entries, beans: v1.beans, ownedPacks: v1.ownedPacks, pageStickers, userAssets: [] };
-}
-
-// v2 → v3: flat monthly StickerInstances become sticker PageElements under
-// the legacy monthly-spread pageKey (2026-07 — where they were placed before
-// local dates); diaries[]/activeDiaryId/pages structure lands. Unused legacy
-// fields (entries) are dropped. Migration never rewrites keys to the current month.
-function migrateV2toV3(v2) {
-  const elements = Array.isArray(v2.pageStickers)
-    ? v2.pageStickers.map((s, i) => createPageElement({
-        id: `el-${s.id}`,
-        type: "sticker",
-        assetId: s.assetId,
-        x: s.x, y: s.y,
-        rotation: s.rotation ?? 0,
-        scale: s.scale ?? 1,
-        z: i,                          // z = array order
-      }))
-    : [];
-  return {
-    version: 3,
-    diaries: [{ id: DIARY_ID, name: "My diary" }],
-    activeDiaryId: DIARY_ID,
-    pages: elements.length ? { [DIARY_ID]: { [LEGACY_MONTH_KEY]: { elements } } } : { [DIARY_ID]: {} },
-    userAssets: v2.userAssets ?? [],
-    beans: v2.beans ?? 12,
-    ownedPacks: v2.ownedPacks ?? [],
-  };
-}
-
+// Read + classify the stored blob ONCE at mount. Returns a LoadResult
+// { status, data, canPersist } — App uses `data` for seed state and `canPersist`
+// to decide whether writing back is safe. A blob we can't read (newer/unknown
+// version, malformed JSON, unsafe shape) is reported non-savable so the save
+// effect below never overwrites it with an empty v3 (see resolvePersistedState).
 function loadPersisted() {
+  let raw = null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (!data) return null;
-    if (data.version === 3) return data;
-    if (data.version === 2) return migrateV2toV3(data);               // one hop
-    if (data.version === 1) return migrateV2toV3(migrateV1toV2(data)); // chained v1→v2→v3
-    return null;                                                       // unknown version → seed defaults
+    raw = localStorage.getItem(STORAGE_KEY);
   } catch {
-    return null; // missing / corrupt / storage unavailable → seed defaults
+    // storage entirely unavailable (private mode / blocked) → treat as a fresh
+    // start; there's nothing stored to preserve, and writes fail-safe below.
+    return { status: "empty", data: null, canPersist: true };
   }
+  return resolvePersistedState(raw);
+}
+
+/* Blocking recovery screen shown when the stored diary can't be opened safely —
+   a schema NEWER than this app understands, an unknown version, corrupt JSON, or
+   an unsafe top-level shape (§8). The original localStorage value is left exactly
+   as-is and the app does NOT auto-save while this shows, so an empty editor can
+   never be mistaken for the real (preserved) diary. Deliberately minimal: no
+   reset/delete, no export, and it never prints the raw stored value. */
+function RecoveryNotice({ t }) {
+  return (
+    <div className="cp-root" style={{ minHeight: "100vh", background: t.bg, display: "flex", justifyContent: "center" }}>
+      <GlobalStyle t={t} />
+      <div style={{ width: "100%", maxWidth: 430, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px 22px" }}>
+        <div style={{ position: "relative", background: t.paper, borderRadius: 22, padding: "32px 24px 28px", boxShadow: "0 8px 26px rgba(51,33,26,.16)", textAlign: "center" }}>
+          <Tape t={t} rot={-3} />
+          <div className="cp-sticker" style={{ fontSize: 42 }}>🫧</div>
+          <div className="cp-display" style={{ fontSize: 18, fontWeight: 700, color: t.ink, marginTop: 12, lineHeight: 1.3 }}>
+            We couldn't open your saved diary safely
+          </div>
+          <p style={{ fontSize: 13.5, color: t.sub, fontWeight: 600, lineHeight: 1.55, marginTop: 12 }}>
+            It looks like it was saved in a newer or unreadable format.{" "}
+            <b style={{ color: t.ink }}>Your local data has not been changed</b> — and this
+            version of Momenti won't save over it.
+          </p>
+          <p style={{ fontSize: 13.5, color: t.sub, fontWeight: 600, lineHeight: 1.55, marginTop: 10 }}>
+            Try updating Momenti, or open your diary on the device or browser where you last used it.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ═══════════════ APP SHELL ═══════════════ */
 
 export default function Momenti() {
-  const [saved] = useState(loadPersisted); // parsed once on mount; null if absent/corrupt
+  // classify the stored blob ONCE on mount (StrictMode re-invokes this pure
+  // reader harmlessly). `saved` seeds state; `canPersistRef` gates every write.
+  const [load] = useState(loadPersisted);
+  const saved = load.data; // null for empty/unsupported/invalid → state falls back to seeds
+  const canPersistRef = useRef(load.canPersist);        // false ⇒ never write over the stored blob
+  const recovery = load.status === "unsupported" || load.status === "invalid";
+  const [saveFailed, setSaveFailed] = useState(false);  // a good-state localStorage write failed
+  const saveFailedNotifiedRef = useRef(false);          // notified this failure streak? re-armed on next successful save
   const [tab, setTab] = useState("diario");
   const [calendarView, setCalendarView] = useState("month"); // month | week
   const [openDay, setOpenDay] = useState(null); // day number with the full-screen day page open
@@ -1205,12 +1201,30 @@ export default function Momenti() {
     };
   });
 
-  /* persist durable state on change (single versioned blob, v3) */
+  /* persist durable state on change (single versioned blob, v3). Two guards:
+     1. canPersistRef — an unreadable stored blob (newer/unknown version, corrupt,
+        unsafe shape) is left untouched; we NEVER overwrite it with empty v3.
+     2. save-failure — quota / blocked storage / DOMException is swallowed so the
+        app never crashes, and surfaced to the user ONCE PER FAILURE STREAK. The
+        notify-ref is re-armed only by a later SUCCESSFUL write (not by dismiss),
+        so while storage stays blocked the banner doesn't reopen on every edit,
+        yet a fresh failure after a recovery is announced again. `saveFailed` is
+        not a dep, so the setState calls here never re-run this effect. */
   useEffect(() => {
+    if (!canPersistRef.current) return; // recovery mode → preserve the original bytes
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, diaries, activeDiaryId, pages, userAssets, beans, ownedPacks }));
+      localStorage.setItem(STORAGE_KEY, serializePersistedState({ diaries, activeDiaryId, pages, userAssets, beans, ownedPacks }));
+      // write succeeded → this failure streak (if any) is over: re-arm the notice
+      // for a FUTURE failure and clear a now-stale banner. setState(false) bails
+      // out with no render when already false, so normal saves cost nothing.
+      saveFailedNotifiedRef.current = false;
+      setSaveFailed(false);
     } catch {
-      // ignore write failures (quota exceeded / private mode)
+      // notify at most once per streak; only a successful write above re-arms it.
+      if (!saveFailedNotifiedRef.current) {
+        saveFailedNotifiedRef.current = true;
+        setSaveFailed(true);
+      }
     }
   }, [diaries, activeDiaryId, pages, userAssets, beans, ownedPacks]);
 
@@ -1458,6 +1472,12 @@ export default function Momenti() {
     </button>
   );
 
+  // Recovery: the stored blob is a newer/unknown version or corrupt. Show a
+  // blocking notice INSTEAD of the editor (all hooks above already ran, so this
+  // early return is rules-of-hooks safe) — the preserved data can't be mistaken
+  // for an empty diary, and no edit surface exists to write over it (§8).
+  if (recovery) return <RecoveryNotice t={t} />;
+
   return (
     <div className="cp-root" style={{ minHeight: "100vh", background: t.bg, display: "flex", justifyContent: "center" }}>
       <GlobalStyle t={t} />
@@ -1524,6 +1544,24 @@ export default function Momenti() {
         {toast && (
           <div className="cp-pop cp-display" style={{ position: "absolute", bottom: 108, left: "50%", transform: "translateX(-50%)", background: t.ink, color: t.bg, borderRadius: 999, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, zIndex: 60, whiteSpace: "nowrap", boxShadow: "0 6px 18px rgba(51,33,26,.3)" }}>
             {toast}
+          </div>
+        )}
+
+        {/* save-failure notice: a good-state write to localStorage failed
+            (blocked storage, quota, or a DOMException — we don't assume which).
+            Shown once per failure streak (dismissible), re-armed by a later
+            successful save; the app keeps working, just unsaved (§9). Neutral
+            wording: no quota claim, no assumption the user edited. Never prints
+            the underlying error or the data being saved. */}
+        {saveFailed && (
+          <div className="cp-fadeup cp-display" role="status" style={{ position: "absolute", bottom: 92, left: 14, right: 14, background: t.paper, color: t.ink, borderRadius: 14, padding: "10px 12px", zIndex: 61, display: "flex", alignItems: "center", gap: 10, border: `1.5px solid ${t.accentSoft}`, boxShadow: "0 6px 18px rgba(51,33,26,.22)" }}>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>💾</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 }}>
+              Momenti can't save changes in this browser right now — anything from this session may not be kept if you reload.
+            </span>
+            <button onClick={() => setSaveFailed(false)} aria-label="dismiss save notice" style={{ border: "none", background: t.accentSoft, borderRadius: 8, width: 24, height: 24, cursor: "pointer", color: t.ink, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <X size={13} />
+            </button>
           </div>
         )}
 

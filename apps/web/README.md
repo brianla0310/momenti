@@ -24,7 +24,10 @@ npm run build    # production build (runs `tsc -b` then `vite build`)
 The app persists a single blob under the `localStorage` key `momenti.v1`
 (storage schema **v3**). **Clearing site data / localStorage deletes your local
 diary** (placed stickers, text, pages). Old blobs migrate forward (v1→v2→v3) on
-load; corrupt/unknown data falls back to seed defaults silently.
+load. A blob the app can't read safely — a schema **newer than v3**, an unknown
+version, corrupt JSON, or a broken top-level shape — is **left untouched**: the
+app shows a recovery notice and won't save over it, rather than silently starting
+empty (see `src/data/persistence.js`).
 
 ## Manual test checklist
 
