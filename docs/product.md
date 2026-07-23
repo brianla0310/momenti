@@ -1895,3 +1895,8 @@ Next recommended development step:
 - 새 순수 모듈 `apps/web/src/data/persistence.js` — localStorage 접근 없이 parse·최소 top-level 구조 검증·마이그레이션 판정만 담당. 로딩이 저장 blob을 **분류**해 반환: `empty` / `ready` / `migrated` / `unsupported` / `invalid` (+ `data`, `canPersist`). `unsupported`(앱보다 새로운/알 수 없는 version)·`invalid`(손상 JSON 또는 안전하지 않은 top-level shape)은 **원본을 그대로 보존**하고 자동 저장을 막음.
 - **preserve-and-bail**: 미래/미지 version·corrupt·잘못된 shape에서 `App.jsx`는 편집 UI 대신 **차단형 recovery 안내**를 띄우고, save effect는 `canPersist` ref로 게이트되어 **원본을 빈 v3로 덮어쓰지 않음**. 정상 empty/ready/migrated에서만 저장 유지(StrictMode 안전). `setItem` 실패(quota/차단)는 try/catch로 앱 crash 없이 처리하고 한 번만 사용자에게 알림. **저장 원본은 화면·console 어디에도 출력하지 않음.**
 - **스키마는 계속 v3**(v4 없음), `momenti.v1` 키·`LEGACY_MONTH_KEY`·모든 `YYYY-MM`/`YYYY-MM-DD` page key 불변. 사진/IndexedDB·backup/export·reset 도구는 도입하지 않음. **다음 작업: JSX lint/test 기반 → 그다음 사진 업로드(§D12-4).**
+### 2026-07-23 — JS/JSX lint + core unit tests (사진 작업 전 기반)
+
+- 기존 ESLint가 `.ts`/`.tsx`만 매칭해 실제 `.js`/`.jsx` 앱 코드를 검사하지 않던 공백을 닫음. `.js`/`.jsx`/`.ts`/`.tsx`에 recommended JavaScript/TypeScript 규칙을 적용하고, JSX에는 Rules of Hooks·dependency warning·Vite React Refresh export 규칙을 켬. 이 과정에서 확실한 미사용 코드(`PACKS`, `activeSurfaceKey`)만 제거하고 기능·UI·저장 동작은 변경하지 않음.
+- Vitest 최소 기반을 추가해 순수 핵심 로직을 고정: `calendar/dateUtils.js`(월/연도/윤년/주 경계·미래 clamp), `data/dayThumbnail.js`(topmost valid sticker·text fallback·missing asset), `data/persistence.js`(empty/ready/migrated/unsupported/invalid·레거시 key 보존·비변형). `npm run test`는 1회 실행, `npm run test:watch`는 개발용 watch.
+- 다음 작업은 로드맵 §D12-4의 **사진 업로드 + 폴라로이드/다이컷 2종 + IndexedDB**. 이 기반 PR은 사진·schema v4·IndexedDB·UI 동작을 추가하지 않음.

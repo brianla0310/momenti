@@ -106,12 +106,6 @@ const UNDO_CAP = 50;
 const CREATOR_EMOJI = ["🌈", "⭐", "💖", "🔥", "🌸", "🍀", "🦋", "🐱", "🌙", "☁️", "🍩", "🧁", "🎀", "👑", "💎", "🍭", "🌵", "🐳", "🍄", "⚡"];
 const CUTE_NAMES = ["Cutie", "Dolce", "Bubbly", "Ciao", "Amore", "Sparkle", "Momento"];
 
-const PACKS = [
-  { id: "dolce", name: "Dolce vita", items: ["🎀", "💌", "🫶"], price: 10 },
-  { id: "estate", name: "Estate italiana", items: ["🍉", "🌊", "⛱️"], price: 8 },
-  { id: "ferra", name: "Ferragosto · limitata!", items: ["🌞", "🍑", "🎆"], price: 20, limited: true },
-];
-
 /* calendar frame (today, days-in-month, Monday-first offset of the 1st) is
    derived from the local date in CAL — see ./calendar/dateUtils. */
 
@@ -352,8 +346,8 @@ function ElementLayer({ t, surfaceRef, elements, resolveAsset, placing, onPlaceA
     <>
       {/* placed elements — press-hold to lift & drag; tap = menu (sticker) / edit (text) */}
       {sorted.map((s) => {
-        let inner = null;
-        let label = "";
+        let inner;
+        let label;
         if (s.type === "sticker") {
           const asset = resolveAsset(s.assetId);
           if (!asset) return null;               // unknown/removed asset → skip (stays safe on load)
@@ -1052,7 +1046,7 @@ function StickerCreatorSheet({ t, onClose, onCreate }) {
 // version, malformed JSON, unsafe shape) is reported non-savable so the save
 // effect below never overwrites it with an empty v3 (see resolvePersistedState).
 function loadPersisted() {
-  let raw = null;
+  let raw;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch {
@@ -1184,9 +1178,6 @@ export default function Momenti() {
       return { ...prev, [activeDiaryId]: { ...diary, [pageKey]: { elements: next } } };
     });
   };
-  /* the surface the Stickerbook overlay targets: open day page, else monthly spread */
-  const activeSurfaceKey = openDay != null ? dayKeyFor(openDay) : viewCal.monthKey;
-
   /* week strip descriptors — 7 real Mon→Sun dates around the anchor, each with
      its OWN "YYYY-MM-DD" key + today/future flags + live elements. Cross-month
      days keep their real month, so opening/preview never mixes months (§4·5). */
