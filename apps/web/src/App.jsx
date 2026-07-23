@@ -896,7 +896,7 @@ function StickerbookSheet({ t, page, setPage, onPick, onClose, userAssets, onCre
             <div className="cp-display" style={{ fontSize: 19, fontWeight: 700, color: t.ink }}>Stickerbook 📒</div>
             <button onClick={onClose} aria-label="close stickerbook" style={{ border: "none", background: t.accentSoft, borderRadius: 10, width: 26, height: 26, cursor: "pointer", color: t.ink }}><X size={14} /></button>
           </div>
-          <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700, marginBottom: 12 }}>tap a sticker to peel it, then stick it on today's page</div>
+          <div style={{ fontSize: 11.5, color: t.sub, fontWeight: 700, marginBottom: 12 }}>tap a sticker to peel it, then stick it on this page</div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
             {items.map((a, i) => (
@@ -1118,6 +1118,13 @@ export default function Momenti() {
      ±7 days across month/year boundaries. Starts on today; carried (clamped)
      across a month switch or set to an opened/navigated day. Never persisted. */
   const [weekAnchor, setWeekAnchor] = useState(() => ({ year: CAL.year, monthIndex: CAL.monthIndex, day: CAL.todayDay }));
+  /* the intended day-of-month to preserve while paging BETWEEN months — kept
+     apart from the *displayed* weekAnchor.day (which is clamped to the target
+     month's length and to today). Month clamping must never shrink the
+     intention, so a 31 → Feb → Aug round-trip returns to 31. Updated only on
+     explicit date choices (open a day, page weeks, Oggi, initial today); month
+     moves READ it but never write it. A ref: it feeds calc, never renders. */
+  const preferredAnchorDayRef = useRef(CAL.todayDay);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const monthTitleRef = useRef(null); // focus returns here when the picker closes
   // Beans / packs stay in state + persistence (UI dormant); no setters — nothing mutates them.
@@ -1315,8 +1322,28 @@ export default function Momenti() {
      past the real current day (§ future-week fix): a would-be future descriptor
      collapses to today. The invariant `weekAnchor <= CAL.today` is enforced at
      the set boundary, not by disabling buttons — so no month/week/day path can
-     leave a future anchor behind for week view to page into. */
-  const commitWeekAnchor = (descriptor) => setWeekAnchor(clampDescriptorToToday(descriptor, CAL.today));
+     leave a future anchor behind for week view to page into.
+
+     Two roles are kept distinct (§ permanent-shrink fix):
+      • commitExplicitWeekAnchor — the user picked a real date (open a day, page
+        a week, Oggi): show it (clamped to today) AND record its day as the new
+        preferred day. Returns the clamped descriptor so callers can sync
+        visibleMonth to the month it landed in.
+      • moveToMonthUsingPreferredDay — a month move (arrows / picker): derive the
+        DISPLAYED day from the preferred day → clamp to the target month's length
+        → clamp to today, then set the anchor. Never writes the preferred day, so
+        a short month never shrinks the intention permanently. */
+  const commitExplicitWeekAnchor = (descriptor) => {
+    const clamped = clampDescriptorToToday(descriptor, CAL.today);
+    preferredAnchorDayRef.current = clamped.day; // this day IS the new intention
+    setWeekAnchor(clamped);
+    return clamped;
+  };
+  const moveToMonthUsingPreferredDay = (year, monthIndex) => {
+    const day = clampDayToMonth(year, monthIndex, preferredAnchorDayRef.current);
+    setWeekAnchor(clampDescriptorToToday({ year, monthIndex, day }, CAL.today));
+    setVisibleMonth({ year, monthIndex });
+  };
 
   /* day page open/close resets the session-scoped history + edit mode. Opens by
      a FULL date (a week cell may be in a month adjacent to the visible one), so
@@ -1326,7 +1353,7 @@ export default function Momenti() {
   const openDayPage = (year, monthIndex, day) => {
     clearDayHistory();
     setEditingTextId(null);
-    commitWeekAnchor({ year, monthIndex, day });
+    commitExplicitWeekAnchor({ year, monthIndex, day }); // opening a day makes it the intention
     setVisibleMonth({ year, monthIndex }); // keep the open day's month in the header/spread
     setOpenDay(day);
   };
@@ -1346,13 +1373,11 @@ export default function Momenti() {
   const changeMonth = (year, monthIndex) => {
     if (isFutureMonth({ year, monthIndex }, CAL.today)) return; // never navigate into the future
     resetMonthSession();
-    // keep the day-of-month (clamped to the target month's length), then never
-    // let the anchor land after today: returning to the CURRENT month with a
-    // day past today collapses to today; a PAST month keeps its real day. The
-    // clamp never changes the month here (future months already returned), so
-    // visibleMonth stays the target month.
-    commitWeekAnchor({ year, monthIndex, day: clampDayToMonth(year, monthIndex, weekAnchor.day) });
-    setVisibleMonth({ year, monthIndex });
+    // show the PREFERRED day clamped to the target month + today (returning to
+    // the current month past today collapses to today; a past month keeps its
+    // real day). The preferred day is only read, never shrunk, so a short month
+    // is fully reversible. moveToMonthUsingPreferredDay also sets visibleMonth.
+    moveToMonthUsingPreferredDay(year, monthIndex);
     setMonthPickerOpen(false);
   };
   const goPrevMonth = () => { const m = addMonths(visibleMonth.year, visibleMonth.monthIndex, -1); changeMonth(m.year, m.monthIndex); };
@@ -1365,9 +1390,9 @@ export default function Momenti() {
      FIRST, then derive visibleMonth from the clamped anchor so the two never
      disagree about the month. */
   const goToWeekAnchor = (anchor) => {
-    const clamped = clampDescriptorToToday(anchor, CAL.today);
     resetMonthSession();
-    setWeekAnchor(clamped);
+    // paging a week is an explicit date change → also updates the preferred day
+    const clamped = commitExplicitWeekAnchor(anchor);
     setVisibleMonth({ year: clamped.year, monthIndex: clamped.monthIndex });
   };
   const goPrevWeek = () => goToWeekAnchor(addDaysLocal(weekAnchor, -7));
@@ -1378,7 +1403,7 @@ export default function Momenti() {
      week (§6). One handler serves both modes. */
   const goToToday = () => {
     resetMonthSession();
-    commitWeekAnchor({ year: CAL.year, monthIndex: CAL.monthIndex, day: CAL.todayDay });
+    commitExplicitWeekAnchor({ year: CAL.year, monthIndex: CAL.monthIndex, day: CAL.todayDay });
     setVisibleMonth({ year: CAL.year, monthIndex: CAL.monthIndex });
     setMonthPickerOpen(false);
   };
@@ -1502,7 +1527,7 @@ export default function Momenti() {
             <TabBtn id="diario" icon={BookOpen} label="Diary" />
             <div style={{ width: 66 }} />
             <TabBtn id="bookshelf" icon={Library} label="Bookshelf" />
-            <button onClick={() => setBookOpen(true)} aria-label="add stickers to today" style={{
+            <button onClick={() => setBookOpen(true)} aria-label="add stickers to this month" style={{
               position: "absolute", left: "50%", top: -20, transform: "translateX(-50%)",
               width: 58, height: 58, borderRadius: "50%", border: `4px solid ${t.bg}`,
               background: t.accent, color: "#fff", cursor: "pointer",
