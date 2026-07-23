@@ -568,6 +568,12 @@ function Diary({ t, view, cal, weekCells, monthElements, dayElements, resolveAss
   // arrows + Oggi follow the active view: months in month view, weeks in week view
   const week = view === "week";
   const showOggi = week ? !isCurrentWeek : !isCurrentMonth;
+  // subtitle names the surface. A PAST week has no honest fixed label (it isn't
+  // "this week"), so hide it there — Oggi still offers the way back. The empty
+  // string keeps the flex:1 spacer, so Oggi stays right-aligned.
+  const subtitle = week
+    ? (isCurrentWeek ? "this week · tap + to add stickers" : "")
+    : "your sticker diary · tap + to add stickers";
 
   return (
     <div style={{ padding: "0 16px 110px" }}>
@@ -585,7 +591,7 @@ function Diary({ t, view, cal, weekCells, monthElements, dayElements, resolveAss
         />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6 }}>
           <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: t.sub, fontWeight: 700 }}>
-            {week ? "this week" : "your sticker diary"} · tap + to add stickers
+            {subtitle}
           </span>
           {/* Oggi appears only while browsing away from today's month/week, in
               the decorative slot; on today it keeps the little bob book (§6) */}
