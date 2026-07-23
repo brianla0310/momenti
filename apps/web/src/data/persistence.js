@@ -186,12 +186,12 @@ export function serializePersistedState(state) {
  *   absent / ""              → empty       (data null, canPersist true)
  *   malformed JSON           → invalid     (data null, canPersist false)
  *   not an object / no ver   → invalid     (data null, canPersist false)
+ *   version === current (v3) → ready       (data v3,  canPersist true)
+ *   broken current shape     → invalid     (data null, canPersist false)
+ *   version 1 or 2           → migrated    (data v3,  canPersist true)
+ *   v1/v2 fails migrate/validate → invalid (data null, canPersist false)
  *   version > current        → unsupported (data null, canPersist false)
- *   version not 1|2|3        → unsupported (data null, canPersist false)
- *   valid v3                 → ready       (data v3,  canPersist true)
- *   broken v3 shape          → invalid     (data null, canPersist false)
- *   valid v1/v2              → migrated     (data v3,  canPersist true)
- *   v1/v2 that fails to migrate/validate → invalid (data null, canPersist false)
+ *   any other number         → unsupported (data null, canPersist false)
  *
  * @param {string|null|undefined} raw
  * @returns {LoadResult}
@@ -214,15 +214,10 @@ export function resolvePersistedState(raw) {
 
   const { version } = parsed;
 
-  // Newer than we understand, or a version number that isn't a known schema:
-  // preserve the original bytes and refuse to auto-save over them.
-  if (version > STORAGE_VERSION) {
-    return { status: "unsupported", data: null, canPersist: false };
-  }
-  if (version !== 1 && version !== 2 && version !== 3) {
-    return { status: "unsupported", data: null, canPersist: false };
-  }
-
+  // Current schema FIRST — the app's OWN current version is recognized before
+  // the unknown-version net below, so bumping STORAGE_VERSION later can never
+  // make today's own-current data classify as `unsupported`. A broken shape at
+  // the current version is preserved as `invalid` (never auto-saved over).
   if (version === STORAGE_VERSION) {
     if (!validateCurrentState(parsed)) {
       return { status: "invalid", data: null, canPersist: false };
@@ -230,14 +225,21 @@ export function resolvePersistedState(raw) {
     return { status: "ready", data: parsed, canPersist: true };
   }
 
-  // v1 / v2 → migrate, then hold the result to the same safety bar as v3.
-  try {
-    const migrated = migratePersistedState(parsed);
-    if (!validateCurrentState(migrated)) {
+  // Known legacy versions with a migration path (v1, v2 → v3). Migrate, then
+  // hold the result to the same safety bar as the current schema.
+  if (version === 1 || version === 2) {
+    try {
+      const migrated = migratePersistedState(parsed);
+      if (!validateCurrentState(migrated)) {
+        return { status: "invalid", data: null, canPersist: false };
+      }
+      return { status: "migrated", data: migrated, canPersist: true };
+    } catch {
       return { status: "invalid", data: null, canPersist: false };
     }
-    return { status: "migrated", data: migrated, canPersist: true };
-  } catch {
-    return { status: "invalid", data: null, canPersist: false };
   }
+
+  // Newer than we understand, or any other version number without a migration
+  // path: preserve the original bytes and refuse to auto-save over them.
+  return { status: "unsupported", data: null, canPersist: false };
 }
