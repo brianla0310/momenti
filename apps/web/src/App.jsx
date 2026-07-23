@@ -1103,8 +1103,8 @@ export default function Momenti() {
   const saved = load.data; // null for empty/unsupported/invalid → state falls back to seeds
   const canPersistRef = useRef(load.canPersist);        // false ⇒ never write over the stored blob
   const recovery = load.status === "unsupported" || load.status === "invalid";
-  const [saveFailed, setSaveFailed] = useState(false);  // a good-state write hit quota / blocked storage
-  const saveFailedNotifiedRef = useRef(false);          // show that notice at most once (no render loop)
+  const [saveFailed, setSaveFailed] = useState(false);  // a good-state localStorage write failed
+  const saveFailedNotifiedRef = useRef(false);          // notified this failure streak? re-armed on next successful save
   const [tab, setTab] = useState("diario");
   const [calendarView, setCalendarView] = useState("month"); // month | week
   const [openDay, setOpenDay] = useState(null); // day number with the full-screen day page open
@@ -1205,13 +1205,22 @@ export default function Momenti() {
      1. canPersistRef — an unreadable stored blob (newer/unknown version, corrupt,
         unsafe shape) is left untouched; we NEVER overwrite it with empty v3.
      2. save-failure — quota / blocked storage / DOMException is swallowed so the
-        app never crashes, and surfaced to the user at most once (a ref, not a
-        dep, keeps repeated failed writes from re-triggering the notice). */
+        app never crashes, and surfaced to the user ONCE PER FAILURE STREAK. The
+        notify-ref is re-armed only by a later SUCCESSFUL write (not by dismiss),
+        so while storage stays blocked the banner doesn't reopen on every edit,
+        yet a fresh failure after a recovery is announced again. `saveFailed` is
+        not a dep, so the setState calls here never re-run this effect. */
   useEffect(() => {
     if (!canPersistRef.current) return; // recovery mode → preserve the original bytes
     try {
       localStorage.setItem(STORAGE_KEY, serializePersistedState({ diaries, activeDiaryId, pages, userAssets, beans, ownedPacks }));
+      // write succeeded → this failure streak (if any) is over: re-arm the notice
+      // for a FUTURE failure and clear a now-stale banner. setState(false) bails
+      // out with no render when already false, so normal saves cost nothing.
+      saveFailedNotifiedRef.current = false;
+      setSaveFailed(false);
     } catch {
+      // notify at most once per streak; only a successful write above re-arms it.
       if (!saveFailedNotifiedRef.current) {
         saveFailedNotifiedRef.current = true;
         setSaveFailed(true);
@@ -1538,14 +1547,17 @@ export default function Momenti() {
           </div>
         )}
 
-        {/* save-failure notice: a good-state write hit quota / blocked storage.
-            Shown once (dismissible); the app keeps working, just unsaved (§9).
-            Never prints the underlying error or the data being saved. */}
+        {/* save-failure notice: a good-state write to localStorage failed
+            (blocked storage, quota, or a DOMException — we don't assume which).
+            Shown once per failure streak (dismissible), re-armed by a later
+            successful save; the app keeps working, just unsaved (§9). Neutral
+            wording: no quota claim, no assumption the user edited. Never prints
+            the underlying error or the data being saved. */}
         {saveFailed && (
           <div className="cp-fadeup cp-display" role="status" style={{ position: "absolute", bottom: 92, left: 14, right: 14, background: t.paper, color: t.ink, borderRadius: 14, padding: "10px 12px", zIndex: 61, display: "flex", alignItems: "center", gap: 10, border: `1.5px solid ${t.accentSoft}`, boxShadow: "0 6px 18px rgba(51,33,26,.22)" }}>
             <span style={{ fontSize: 18, flexShrink: 0 }}>💾</span>
             <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 }}>
-              We couldn't save your latest changes — your device storage may be full. Recent edits may be lost if you reload.
+              Momenti can't save changes in this browser right now — anything from this session may not be kept if you reload.
             </span>
             <button onClick={() => setSaveFailed(false)} aria-label="dismiss save notice" style={{ border: "none", background: t.accentSoft, borderRadius: 8, width: 24, height: 24, cursor: "pointer", color: t.ink, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <X size={13} />
