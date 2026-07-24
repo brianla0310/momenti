@@ -59,8 +59,12 @@ describe("pickDayThumbnail", () => {
     ];
     const before = JSON.stringify(elements);
 
-    pickDayThumbnail(elements, resolveAsset);
+    const result = pickDayThumbnail(elements, resolveAsset);
 
+    // this is the file's only descending-z fixture, so it is what distinguishes
+    // "highest z wins" from "last valid sticker wins" — assert it, don't just
+    // check for mutation.
+    expect(result).toEqual({ kind: "sticker", asset: ASSETS.first });
     expect(JSON.stringify(elements)).toBe(before);
   });
 });

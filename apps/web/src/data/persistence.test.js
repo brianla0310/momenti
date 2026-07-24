@@ -6,12 +6,32 @@ import {
   migratePersistedState,
   resolvePersistedState,
   serializePersistedState,
+  STORAGE_KEY,
   STORAGE_VERSION,
   validateCurrentState,
 } from "./persistence";
 
+/* These three values are already on disk in every existing user's browser, so
+   they are frozen: persistence.js says "Do not change this value" for the key
+   and the legacy month, and CLAUDE.md pins the schema at v3.
+   Asserted against LITERALS on purpose — comparing them to the imported
+   constant would move with the constant and detect nothing. */
+describe("frozen storage contract", () => {
+  it("keeps the on-disk localStorage key at momenti.v1", () => {
+    expect(STORAGE_KEY).toBe("momenti.v1");
+  });
+
+  it("keeps the schema version at 3", () => {
+    expect(STORAGE_VERSION).toBe(3);
+  });
+
+  it("keeps the legacy monthly-spread destination at 2026-07", () => {
+    expect(LEGACY_MONTH_KEY).toBe("2026-07");
+  });
+});
+
 const validV3 = () => ({
-  version: STORAGE_VERSION,
+  version: 3,
   diaries: [{ id: DIARY_ID, name: "My diary" }],
   activeDiaryId: DIARY_ID,
   pages: {
@@ -29,7 +49,7 @@ describe("persistence safety", () => {
   it("creates a valid current-schema default state", () => {
     const state = createDefaultPersistedState();
 
-    expect(state.version).toBe(STORAGE_VERSION);
+    expect(state.version).toBe(3);
     expect(validateCurrentState(state)).toBe(true);
     expect(state.pages).toEqual({ [DIARY_ID]: {} });
   });
@@ -47,6 +67,13 @@ describe("persistence safety", () => {
     expect(result.canPersist).toBe(true);
     expect(result.data.pages[DIARY_ID]).toHaveProperty("2026-07");
     expect(result.data.pages[DIARY_ID]).toHaveProperty("2026-07-23");
+
+    // page keys survive a load byte-for-byte, in both shapes and with nothing
+    // added or renamed: "YYYY-MM" = monthly spread, "YYYY-MM-DD" = day page.
+    const keys = Object.keys(result.data.pages[DIARY_ID]);
+    expect([...keys].sort()).toEqual(["2026-07", "2026-07-23"]);
+    expect(keys.filter((k) => /^\d{4}-\d{2}$/.test(k))).toEqual(["2026-07"]);
+    expect(keys.filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k))).toEqual(["2026-07-23"]);
   });
 
   it("preserves malformed JSON and unsupported versions by disabling persistence", () => {
@@ -61,6 +88,19 @@ describe("persistence safety", () => {
       canPersist: false,
     });
     expect(resolvePersistedState(JSON.stringify({ version: 999 }))).toEqual({
+      status: "unsupported",
+      data: null,
+      canPersist: false,
+    });
+    // pinned to the LITERAL next version, not STORAGE_VERSION + 1: a schema bump
+    // must break this loudly instead of silently retargeting one version higher.
+    expect(resolvePersistedState(JSON.stringify({ version: 4 }))).toEqual({
+      status: "unsupported",
+      data: null,
+      canPersist: false,
+    });
+    // a future version carrying an otherwise-perfect v3 body must NOT be adopted
+    expect(resolvePersistedState(JSON.stringify({ ...validV3(), version: 4 }))).toEqual({
       status: "unsupported",
       data: null,
       canPersist: false,
@@ -92,8 +132,9 @@ describe("persistence safety", () => {
 
     expect(result.status).toBe("migrated");
     expect(result.canPersist).toBe(true);
-    expect(result.data.version).toBe(STORAGE_VERSION);
-    expect(result.data.pages[DIARY_ID][LEGACY_MONTH_KEY].elements[0]).toMatchObject({
+    expect(result.data.version).toBe(3);
+    expect(Object.keys(result.data.pages[DIARY_ID])).toEqual(["2026-07"]);
+    expect(result.data.pages[DIARY_ID]["2026-07"].elements[0]).toMatchObject({
       id: "el-7",
       type: "sticker",
       assetId: "caffe-0",
@@ -121,7 +162,8 @@ describe("persistence safety", () => {
     const result = resolvePersistedState(JSON.stringify(v2));
 
     expect(result.status).toBe("migrated");
-    expect(result.data.pages[DIARY_ID]).toHaveProperty(LEGACY_MONTH_KEY);
+    expect(result.data.version).toBe(3);
+    expect(Object.keys(result.data.pages[DIARY_ID])).toEqual(["2026-07"]);
   });
 
   it("does not mutate a legacy object while migrating it", () => {
@@ -143,7 +185,7 @@ describe("persistence safety", () => {
     const parsed = JSON.parse(serialized);
     const result = resolvePersistedState(serialized);
 
-    expect(parsed.version).toBe(STORAGE_VERSION);
+    expect(parsed.version).toBe(3);
     expect(result.status).toBe("ready");
     expect(result.data).toEqual(state);
   });
