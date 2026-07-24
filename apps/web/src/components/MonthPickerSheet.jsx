@@ -25,15 +25,9 @@ export default function MonthPickerSheet({ t, visibleMonth, today, onSelect, onT
   const [pickerYear, setPickerYear] = useState(visibleMonth.year);
   const dialogRef = useRef(null);
 
-  // move focus into the sheet on open; restore it to the opener on unmount.
-  // The opener is read at CLEANUP time on purpose: the month-title button is
-  // re-rendered (month/week view, month changes) while the sheet is open, so a
-  // node captured at open time could be the detached one and focus() on it
-  // would silently drop focus to <body>. Reading returnFocusRef.current in the
-  // cleanup always focuses the button that is actually mounted right then.
+  // move focus into the sheet on open; restore it to the opener on unmount
   useEffect(() => {
     dialogRef.current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- focus return needs the CURRENT opener node, not the one captured at open time
     return () => returnFocusRef?.current?.focus?.();
   }, [returnFocusRef]);
 
