@@ -12,12 +12,14 @@ Run all commands **from this `apps/web` folder**:
 ```bash
 npm install      # install dependencies (first time / after lockfile changes)
 npm run dev      # start the dev server — Vite prints the localhost URL in the terminal
-npm run lint     # run eslint
-npm run build    # production build (runs `tsc -b` then `vite build`)
+npm run lint       # lint JS/JSX/TS/TSX source and config files
+npm run test       # run the core unit tests once (Vitest)
+npm run test:watch # keep Vitest open while developing
+npm run build      # production build (runs `tsc -b` then `vite build`)
 ```
 
 - Stop the dev server with **Ctrl + C** in its terminal.
-- There is no test script in `package.json` yet.
+- `npm run test` exits after one run; use `npm run test:watch` only when you want watch mode.
 
 ## Local data
 
@@ -47,9 +49,13 @@ After changes, sanity-check in the browser:
 ```
 src/
   App.jsx                 # the whole app (JSX-first prototype)
+  calendar/
+    dateUtils.js          # pure local-date/month/week helpers (+ unit tests)
   data/
     stickers.js           # StickerAsset model + seed
     pageElements.js       # unified PageElement model (sticker / text)
+    dayThumbnail.js       # pure calendar-preview selection (+ unit tests)
+    persistence.js        # pure parse/validate/migrate policy (+ unit tests)
   components/
     StickerVisual.jsx     # shared sticker renderer (paper / glitter)
   design/                 # design tokens: tokens, typography, shadows, motion
