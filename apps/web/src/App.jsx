@@ -116,6 +116,13 @@ const randomTilt = () => {
   const [min, max] = STICKER.rotationRange;
   return min + Math.random() * (max - min);
 };
+/* a new text box lands near the page centre with a small jitter + gentle tilt.
+   Module scope (like randomTilt) — randomness stays out of the component body. */
+const randomTextSpot = () => ({
+  x: 50 + (Math.random() * 10 - 5),
+  y: 42 + (Math.random() * 10 - 5),
+  rotation: Math.random() * 5 - 2.5,
+});
 
 /* ---------- global css ---------- */
 const GlobalStyle = ({ t }) => (
@@ -1088,6 +1095,21 @@ function RecoveryNotice({ t }) {
   );
 }
 
+/* bottom-nav tab button. Module scope on purpose: declared inside Momenti it
+   would be a NEW component type on every render, so React would unmount and
+   remount both tab buttons on each render (recreated DOM, dropped keyboard
+   focus, restarted colour transition). Theme + selection come in as props. */
+const TabBtn = ({ t, icon: Icon, label, active, onSelect }) => (
+  <button onClick={onSelect} aria-label={label} style={{
+    flex: 1, border: "none", background: "transparent", cursor: "pointer",
+    display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px",
+    color: active ? t.accent : t.sub, transition: "color .15s",
+  }}>
+    <Icon size={21} strokeWidth={active ? 2.4 : 2} />
+    <span className="cp-display" style={{ fontSize: 10, fontWeight: 600 }}>{label}</span>
+  </button>
+);
+
 /* ═══════════════ APP SHELL ═══════════════ */
 
 export default function Momenti() {
@@ -1209,6 +1231,11 @@ export default function Momenti() {
       // for a FUTURE failure and clear a now-stale banner. setState(false) bails
       // out with no render when already false, so normal saves cost nothing.
       saveFailedNotifiedRef.current = false;
+      // The write is the effect's whole purpose, and its success is what clears
+      // the banner — there is no render-time value to derive this from. React
+      // bails out with no re-render when saveFailed is already false, so the
+      // normal path costs nothing and cannot cascade.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the banner only after a successful write (§9)
       setSaveFailed(false);
     } catch {
       // notify at most once per streak; only a successful write above re-arms it.
@@ -1278,8 +1305,7 @@ export default function Momenti() {
   const createTextElement = (pageKey) => {
     const el = createPageElement({
       type: "text", content: "", font: "hand", color: TEXT_COLORS[0], sizeLevel: "M",
-      x: 50 + (Math.random() * 10 - 5), y: 42 + (Math.random() * 10 - 5),
-      rotation: Math.random() * 5 - 2.5, scale: 1,
+      ...randomTextSpot(), scale: 1,
       z: elementsOf(pageKey).reduce((m, e) => Math.max(m, e.z ?? 0), 0) + 1,
     });
     setElements(pageKey, (els) => [...els, el]);
@@ -1421,8 +1447,16 @@ export default function Momenti() {
 
   /* Ctrl/Cmd+Z (undo) · +Shift or Ctrl+Y (redo) while a day page is open.
      Typing in the textarea keeps the browser's native text undo. */
-  const undoDayRef = useRef(undoDay); undoDayRef.current = undoDay;
-  const redoDayRef = useRef(redoDay); redoDayRef.current = redoDay;
+  const undoDayRef = useRef(undoDay);
+  const redoDayRef = useRef(redoDay);
+  /* keep the "latest" handlers in refs so the keydown listener below is bound
+     ONCE per open day instead of re-subscribing every render. Written after
+     commit (never during render); the listener only fires on real key events,
+     which always happen after a commit, so it never sees a stale handler. */
+  useEffect(() => {
+    undoDayRef.current = undoDay;
+    redoDayRef.current = redoDay;
+  });
   useEffect(() => {
     if (openDay == null) return;
     const onKey = (e) => {
@@ -1451,17 +1485,6 @@ export default function Momenti() {
     setUserAssets((a) => [...a, asset]);
     showToast(`${content} added to your Stickerbook ✨`);
   };
-
-  const TabBtn = ({ id, icon: Icon, label }) => (
-    <button onClick={() => setTab(id)} aria-label={label} style={{
-      flex: 1, border: "none", background: "transparent", cursor: "pointer",
-      display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 7px",
-      color: tab === id ? t.accent : t.sub, transition: "color .15s",
-    }}>
-      <Icon size={21} strokeWidth={tab === id ? 2.4 : 2} />
-      <span className="cp-display" style={{ fontSize: 10, fontWeight: 600 }}>{label}</span>
-    </button>
-  );
 
   // Recovery: the stored blob is a newer/unknown version or corrupt. Show a
   // blocking notice INSTEAD of the editor (all hooks above already ran, so this
@@ -1507,6 +1530,12 @@ export default function Momenti() {
               isCurrentMonth={viewCal.isCurrentMonth} isCurrentWeek={isCurrentWeek}
               onOpenMonthPicker={() => setMonthPickerOpen(true)}
               onToday={goToToday} monthTitleRef={monthTitleRef}
+              /* surfaceHandlers closes over pushDayUndo, which reads the undo
+                 stacks (refs, §D15), so this render-time call counts as a
+                 transitive ref access. The handlers themselves only ever run
+                 from events; moving the stacks into state is an undo redesign,
+                 out of scope for this lint PR. */
+              // eslint-disable-next-line react-hooks/refs -- undo stacks are refs by design (§D15)
               {...surfaceHandlers(viewCal.monthKey)}
             />
           )}
@@ -1525,8 +1554,14 @@ export default function Momenti() {
             onClose={closeDayPage}
             editingTextId={editingTextId} onEditText={setEditingTextId}
             onAddText={() => { pushDayUndo(dayKeyFor(openDay)); createTextElement(dayKeyFor(openDay)); }}
+            /* the undo/redo stacks are refs (§D15) and histVer re-renders these
+               buttons whenever they change, so reading .current here is the
+               intended design — same trade-off as the Diary spread above. */
+            // eslint-disable-next-line react-hooks/refs -- undo stacks are refs by design (§D15)
             canUndo={undoRef.current.length > 0} onUndo={undoDay}
+            // eslint-disable-next-line react-hooks/refs -- undo stacks are refs by design (§D15)
             canRedo={redoRef.current.length > 0} onRedo={redoDay}
+            // eslint-disable-next-line react-hooks/refs -- undo stacks are refs by design (§D15)
             {...surfaceHandlers(dayKeyFor(openDay), { undoable: true })}
           />
         )}
@@ -1559,9 +1594,9 @@ export default function Momenti() {
         {/* bottom nav + FAB */}
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 30 }}>
           <div style={{ margin: "0 14px 14px", background: t.paper, borderRadius: 22, boxShadow: "0 -2px 20px rgba(51,33,26,.14)", display: "flex", alignItems: "center", position: "relative" }}>
-            <TabBtn id="diario" icon={BookOpen} label="Diary" />
+            <TabBtn t={t} icon={BookOpen} label="Diary" active={tab === "diario"} onSelect={() => setTab("diario")} />
             <div style={{ width: 66 }} />
-            <TabBtn id="bookshelf" icon={Library} label="Bookshelf" />
+            <TabBtn t={t} icon={Library} label="Bookshelf" active={tab === "bookshelf"} onSelect={() => setTab("bookshelf")} />
             <button onClick={() => setBookOpen(true)} aria-label="add stickers to this month" style={{
               position: "absolute", left: "50%", top: -20, transform: "translateX(-50%)",
               width: 58, height: 58, borderRadius: "50%", border: `4px solid ${t.bg}`,
